@@ -30,6 +30,8 @@ depswriter() {
  $CLOSURE_LIBRARY_REPO/closure/bin/build/depswriter.py "$@"
 }
 
+echo_and_run() { echo "$@" ; "$@" ; }
+
 # First attempt at build tool for more-or-less j2cl compatible projects. This doesn't include jsinterop-base, because
 # it is deliberately incompatible with j2cl. It is assumed that this has been invoked for ALL upstream deps, since
 # my bash+mvn isn't good enough to skip things that don't need j2cl.
@@ -138,7 +140,7 @@ jscomp() {
     rm cp.txt
     jszip="--jszip $cp --jszip $g/$a-$v-jszip.zip"
 
-    java -server -XX:+TieredCompilation \
+    echo_and_run java -server -XX:+TieredCompilation \
         -jar $CLOSURE_COMPILER_JAR \
         --entry_point 'app' \
         --js $entrypoint $jszip \
