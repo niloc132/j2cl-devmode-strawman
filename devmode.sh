@@ -1,23 +1,29 @@
 #!/usr/bin/env bash
 set -e
 
+# First, build the transpiler from the bazel-build branch:
+#   $ bazel build //transpiler/java/com/google/j2cl/transpiler:J2clTranspiler
+# Then primitives (requires patch to correctly emit java primtives!):
+#   $ bazel build //jre/java/javaemul/internal/vmbootstrap/primitives:primitives
+# Then the full jre:
+#   $ bazel build //jre/java:jre
+
 # Update these env vars as needed
 J2CL_REPO=/Users/colin/workspace/j2cl
 CLOSURE_LIBRARY_REPO=/Users/colin/workspace/closure-library
 CLOSURE_COMPILER_JAR=/Users/colin/workspace/closure-compiler/target/closure-compiler-1.0-SNAPSHOT.jar
 
-# Finally, skip down to the end of the file to customize what dependencies you build, compile.
-
-
+# location of jre emulation
 base_cp="$J2CL_REPO/bazel-bin/jre/java/jre.jar"
+base_zips="$J2CL_REPO/bazel-bin/jre/java/jre.js.zip"
 
-
+# params from command line:
+# $ devmode.sh [<source-dir> [<pom.xml> [<web-dir>]]]
 sources=${1-.}
 pom=${2-pom.xml}
 serve_from=${3-out}
 j2cl_cp=$base_cp
 timestamp=$sources/.timestamp
-
 
 # Call j2cl directly
 J2clTranspiler() {
@@ -41,25 +47,46 @@ compile_changed() {
     fi
 
     modified_list=$(find $sources -type f -newer $timestamp -name '*.java' | tr '\n' ' ')
+#    echo $modified_list
 
-    touch $timestamp
 
     # if empty, sleep a second and return
     if [[ -z $modified_list ]]
     then
         sleep 1
     else
+        touch $timestamp
 
         # else recompile all files
         # TODO on error, nuke the output dir, so we can start over from scratch
-        echo_and_run J2clTranspiler -cp $j2cl_cp -d $serve_from/project $modified_list && echo "Recompile Successful"
-        depswriter --root $serve_from/project > $serve_from/project/deps.js
+        javac -cp $j2cl_cp:target/classes -sourcepath '' -d target/classes $modified_list && echo "javac done"
+        echo_and_run J2clTranspiler -cp $j2cl_cp:target/classes -d $serve_from/project $modified_list && echo "j2cl done"
+
+        echo_and_run time java -server -XX:+TieredCompilation -Xmx1g \
+            -jar $CLOSURE_COMPILER_JAR \
+            --entry_point 'app' \
+            --js "$serve_from/**/*.js" --jszip $jszip \
+            --js "$J2CL_REPO/jre/java/javaemul/internal/nativebootstrap/*.js" \
+            --js "$J2CL_REPO/jre/java/java/lang/jre.js" \
+            --js "$CLOSURE_LIBRARY_REPO/closure/goog/reflect/reflect.js" \
+            --jszip "$J2CL_REPO/bazel-bin/jre/java/jre.js.zip" \
+            --js "$J2CL_REPO/jre/java/javaemul/internal/vmbootstrap/*.js" \
+            --js "$J2CL_REPO/bazel-genfiles/jre/java/javaemul/internal/vmbootstrap/primitives/*.js" \
+            --js "$CLOSURE_LIBRARY_REPO/closure/goog/math/long.js" \
+            --js "$J2CL_REPO/jre/java/javaemul/internal/vmbootstrap/**/*.js" \
+            --js "$CLOSURE_LIBRARY_REPO/closure/goog/asserts/asserts.js" \
+            --js "$CLOSURE_LIBRARY_REPO/closure/goog/debug/error.js" \
+            --js "$CLOSURE_LIBRARY_REPO/closure/goog/dom/nodetype.js" \
+            --js "$CLOSURE_LIBRARY_REPO/closure/goog/string/string.js" \
+            --js "$CLOSURE_LIBRARY_REPO/closure/goog/base.js" \
+            --compilation_level BUNDLE \
+            --define ENABLE_DEBUG_LOADER=false \
+            --js_output_file "$serve_from/out.js" \
+        && sed -e '1i\
+this["CLOSURE_UNCOMPILED_DEFINES"] = {"goog.ENABLE_DEBUG_LOADER": false};\' -i '' "$serve_from/out.js" \
+        && echo "jscomp done, ready to refresh"
 
     fi
-}
-
-echo_script() {
-    echo "<script src=\"$1\"></script>"
 }
 
 # setup: verify pid file doesn't exist, or someone else is doing this
@@ -72,36 +99,13 @@ fi
 trap "rm -f $timestamp; exit 1" 0 1 2 3 13 15
 touch -t "197001010000" "$timestamp"
 
-# collect, unpack dependencies and build classpath string
-mkdir -p $serve_from/deps
-mkdir -p $serve_from/project
-
 mvn -f $pom dependency:build-classpath -Dmdep.outputFile=`pwd`/cp.txt
 j2cl_cp=$j2cl_cp:`cat cp.txt`
 rm cp.txt
 
 mvn -f $pom dependency:build-classpath -Dmdep.outputFile=`pwd`/cp.txt -Dclassifier=jszip -Dtype=zip
-zips=`cat cp.txt`
-
-pushd $serve_from/deps
-IFS=':'
-for zip in $zips; do
-    unzip -o $zip
-done
-popd
-unset IFS
-
-# soft link to closure-library
-ln -sf $CLOSURE_LIBRARY_REPO/closure/goog $serve_from/deps/goog
-
-
-# echo base.js and all deps.js files as script tags (TODO relative to what?)
-# gather all deps.js files
-echo_script deps/goog/base.js
-echo_script project/deps.js
-for dep in $(ls $serve_from/deps | grep "\-deps\.js$"); do
-    echo_script deps/$dep
-done;
+jszip="$base_zips --jszip `cat cp.txt | sed -e 's/:/ --jszip /g'`"
+rm cp.txt
 
 # spin, looking for changed files and recompiling them
 while true
