@@ -66,7 +66,7 @@ j2cl_compile_mvn_jar() {
 
     mkdir out
     J2clTranspiler -cp "$base_cp:$cp" -d "out" "$srcjar"
-    depswriter --root out/ > "out/$a-$v-deps.js"
+    depswriter --root out/ > "out/$a-$v-deps.txt"
 
     pushd out
     zip -r ../$g/$a-$v.js.zip *
@@ -107,7 +107,7 @@ j2cl_compile_interop_base_bug() {
 
     mkdir out
     J2clTranspiler -cp "$base_cp:$cp" -d "out" com.google.jsinterop/jsinterop/base/*.java
-    depswriter --root out/ > out/base-1.0.0-beta-1-deps.js
+    depswriter --root out/ > out/base-1.0.0-beta-1-deps.txt
     
     pushd out
     zip -r ../com.google.jsinterop/base-1.0.0-beta-1.js.zip *
