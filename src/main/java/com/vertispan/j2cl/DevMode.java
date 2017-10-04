@@ -11,8 +11,7 @@ import org.kohsuke.args4j.Option;
 
 import javax.tools.*;
 import javax.tools.JavaCompiler.CompilationTask;
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.PathMatcher;
@@ -27,6 +26,12 @@ import static com.google.common.io.Files.createTempDir;
  * Simple "dev mode" for j2cl+closure, based on the existing bash script. Lots of room for improvement, this
  * isn't intended to be a proposal, just another experiment on the way to one.
  *
+ * Assumptions:
+ *   o The js-compatible JRE is already on the classpath. Probably not a good one, but on the other hand, we
+ *     may want to allow changing out the JRE (or skipping it) in favor of something else.
+ *   o A JS entrypoint already exists. Probably safe, should get some APT going soon as discussed, at least to
+ *     try it out.
+ *
  * Things about this I like:
  *   o Treat both jars and jszips as classpaths (ease of dependency system integrations)
  *   o Annotation processors are (or should be) run as an IDE would do, so all kinds of changes are picked up. I
@@ -40,15 +45,15 @@ import static com.google.common.io.Files.createTempDir;
  */
 public class DevMode {
     public static class Options {
-        @Option(name = "-src", usage = "specify one or more java source directories")
+        @Option(name = "-src", usage = "specify one or more java source directories", required = true)
         List<String> sourceDir;
-        @Option(name = "-classes", usage = "provide a directory to put compiled bytecode in")
+        @Option(name = "-classes", usage = "provide a directory to put compiled bytecode in", required = true)
         String classesDir;
-        @Option(name = "-jsClasspath", usage = "specify js archive classpath")
+        @Option(name = "-jsClasspath", usage = "specify js archive classpath", required = true)
         String j2clClasspath;
-        @Option(name = "-classpath", usage = "specify java classpath")
+        @Option(name = "-classpath", usage = "specify java classpath", required = true)
         String bytecodeClasspath;
-        @Option(name = "-out", usage = "indicates where to write generated JS sources")
+        @Option(name = "-out", usage = "indicates where to write generated JS sources", required = true)
         String outputJsPath;
 
     }
@@ -64,11 +69,10 @@ public class DevMode {
             System.exit(1);
         }
 
-        String intermediateJsPath = createTempDir().getPath();
+        String intermediateJsPath = createTempDir().getPath();//TODO allow this to be configurable
 //        System.out.println("intermediate js path " + intermediateJsPath);
-        File generatedClassesPath = createTempDir();
+        File generatedClassesPath = createTempDir();//TODO allow this to be configurable
 //        System.out.println("generated classes path " + generatedClassesPath);
-
 
         options.bytecodeClasspath += ":" + options.classesDir;
         List<File> classpath = new ArrayList<>();
@@ -85,13 +89,21 @@ public class DevMode {
         fileManager.setLocation(StandardLocation.CLASS_PATH, classpath);
         File classesDirFile = new File(options.classesDir);
         classesDirFile.mkdirs();
-        Preconditions.checkState(classesDirFile.isDirectory(), "either -classes does not point at a directory, or we couldn't create it");
+        Preconditions.checkState(classesDirFile.exists() && classesDirFile.isDirectory(), "either -classes does not point at a directory, or we couldn't create it");
         fileManager.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singleton(classesDirFile));
 
         //put all j2clClasspath items into a list, we'll copy each time and add generated js
         //TODO put j2cl emul guts in here, jre - or else make them a real dep
         List<String> baseJ2clArgs = Arrays.asList("-cp", options.bytecodeClasspath, "-d", intermediateJsPath);
-        List<String> baseClosureArgs = new ArrayList<>(Arrays.asList("--compilation_level", CompilationLevel.BUNDLE.name(), "--js_output_file", options.outputJsPath + "/app.js"));
+        String intermediateJsOutput = options.outputJsPath + "/temp.js";
+        List<String> baseClosureArgs = new ArrayList<>(Arrays.asList("--compilation_level", CompilationLevel.BUNDLE.name(), "--js_output_file", intermediateJsOutput));
+
+        //if you don't reference the magic sauce via --js, bad things happen, and I can't quite tell why.
+        baseClosureArgs.add("--js");
+        baseClosureArgs.add("/Users/colin/workspace/j2cl/tmp/**/*.js");
+        baseClosureArgs.add("--js");
+        baseClosureArgs.add("/Users/colin/workspace/closure-library/closure/goog/base.js");
+
         for (String zipPath : options.j2clClasspath.split(File.pathSeparator)) {
             Preconditions.checkArgument(new File(zipPath).exists() && new File(zipPath).isFile(), "jszip doesn't exist! %s", zipPath);
 
@@ -101,13 +113,21 @@ public class DevMode {
         baseClosureArgs.add("--js");
         baseClosureArgs.add(intermediateJsPath + "/**/*.js");//precludes default package
         FileTime lastModified = FileTime.fromMillis(0);
+        FileTime lastSuccess = FileTime.fromMillis(0);
         PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:**/*.java");
+
+        Compiler jsCompiler = new Compiler(System.err);
+
         while (true) {
             // currently polling for changes.
             // block until changes instead? easy to replace with filewatcher, just watch out for java9/osx issues...
 
             List<String> modifiedJavaFiles = new ArrayList<>();
             FileTime newerThan = lastModified;
+            long pollStarted = System.currentTimeMillis();
+
+            //this isn't quite right - should check for _at least one_ newer than lastModified, and if so, recompile all
+            //newer than lastSuccess
             for (String dir : options.sourceDir) {
                 Files.find(Paths.get(dir),
                         Integer.MAX_VALUE,
@@ -118,6 +138,7 @@ public class DevMode {
                         })
                         .forEach(file -> modifiedJavaFiles.add(file.toString()));
             }
+            long pollTime = System.currentTimeMillis() - pollStarted;
             // don't replace this until the loop finishes successfully, so we know the last time we started a successful compile
             FileTime nextModifiedIfSuccessful = FileTime.fromMillis(System.currentTimeMillis());
 
@@ -134,16 +155,19 @@ public class DevMode {
             //TODO pass-non null for "classes" to properly kick apt?
             //TODO consider a different classpath for this tasks, so as to not interfere with everything else?
 
+            long javacStarted = System.currentTimeMillis();
             CompilationTask task = compiler.getTask(null, fileManager, null, javacOptions, null, modifiedFileObjects);
             if (!task.call()) {
                 //error occurred, should have been logged, skip the rest of this loop
                 continue;
             }
+            long javacTime = System.currentTimeMillis() - javacStarted;
 
             List<String> j2clArgs = new ArrayList<>(baseJ2clArgs);
             // add all modified Java files
             //TODO don't just use all generated classes, but look for changes maybe?
             j2clArgs.addAll(modifiedJavaFiles);
+
             Files.find(Paths.get(generatedClassesPath.getAbsolutePath()),
                     Integer.MAX_VALUE,
                     (filePath, fileAttr) ->
@@ -158,6 +182,7 @@ public class DevMode {
 
             // Sadly, can't do this, each run of the transpiler MUST be in its own thread, since it
             // can't seem to clean up its threadlocals.
+            long j2clStarted = System.currentTimeMillis();
 //            Result transpileResult = transpiler.transpile(j2clArgs.toArray(new String[0]));
             ExecutorService executorService = Executors.newSingleThreadExecutor();
             Future<Result> futureResult = executorService.submit(() -> {
@@ -165,6 +190,7 @@ public class DevMode {
                 return transpiler.transpile(j2clArgs.toArray(new String[0]));
             });
             Result transpileResult = futureResult.get();
+            long j2clTime = System.currentTimeMillis() - j2clStarted;
             transpileResult.getProblems().report(System.out, System.err);
             executorService.shutdownNow();//technically the finalizer will call shutdown, but we can cleanup now
             if (transpileResult.getExitCode() != 0) {
@@ -174,25 +200,51 @@ public class DevMode {
 
             //collect all js into one artifact (currently jscomp, but it would be wonderful to not pay quite so much for this...)
             List<String> jscompArgs = new ArrayList<>(baseClosureArgs);
-            System.out.println(jscompArgs);
+//            System.out.println(jscompArgs);
 
+            long jscompStarted = System.currentTimeMillis();
+            CommandLineRunner jscompRunner = new InProcessJsCompRunner(jscompArgs.toArray(new String[0]), jsCompiler);
+            if (!jscompRunner.shouldRunCompiler()) {
+                continue;
+            }
+            jscompRunner.run();
+            if (jscompRunner.hasErrors()) {
+                continue;
+            }
+            long jscompTime = System.currentTimeMillis() - jscompStarted;
 
-            CommandLineRunner jscompRunner = new InProcessJsCompRunner(jscompArgs.toArray(new String[0]));
-            if (jscompRunner.shouldRunCompiler()) {
-                jscompRunner.run();
-                if (jscompRunner.hasErrors()) {
-                    continue;
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(intermediateJsOutput)))) {
+
+                try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(options.outputJsPath + "/app.js")))) {
+                    writer.append("this[\"CLOSURE_UNCOMPILED_DEFINES\"] = {\"goog.ENABLE_DEBUG_LOADER\": false};\n");
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        writer.append(line);
+                        writer.newLine();
+                    }
                 }
             }
-            System.out.println("Recommpile of " + modifiedJavaFiles.size() + " source classes finished in " + (System.currentTimeMillis() - nextModifiedIfSuccessful.to(TimeUnit.MILLISECONDS)) + "ms");
+
+            System.out.println("Recompile of " + modifiedJavaFiles.size() + " source classes finished in " + (System.currentTimeMillis() - nextModifiedIfSuccessful.to(TimeUnit.MILLISECONDS)) + "ms");
+            System.out.println("poll: " + pollTime + "millis");
+            System.out.println("javac: " + javacTime + "millis");
+            System.out.println("j2cl: " + j2clTime + "millis");
+            System.out.println("jscomp: " + jscompTime + "millis");
             lastModified = nextModifiedIfSuccessful;
         }
     }
     
     static class InProcessJsCompRunner extends CommandLineRunner {
-        InProcessJsCompRunner(String[] args) {
+        private final Compiler compiler;
+        InProcessJsCompRunner(String[] args, Compiler compiler) {
             super(args);
+            this.compiler = compiler;
             setExitCodeReceiver(ignore -> null);
+        }
+
+        @Override
+        protected Compiler createCompiler() {
+            return compiler;
         }
     }
 
