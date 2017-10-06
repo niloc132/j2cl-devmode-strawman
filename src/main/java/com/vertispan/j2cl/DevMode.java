@@ -5,6 +5,8 @@ import com.google.j2cl.transpiler.J2clTranspiler;
 import com.google.j2cl.transpiler.J2clTranspiler.Result;
 import com.google.javascript.jscomp.CommandLineRunner;
 import com.google.javascript.jscomp.CompilationLevel;
+import com.google.javascript.jscomp.Compiler;
+import com.google.javascript.jscomp.CompilerOptions.DependencyMode;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.Option;
@@ -93,16 +95,24 @@ public class DevMode {
         fileManager.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singleton(classesDirFile));
 
         //put all j2clClasspath items into a list, we'll copy each time and add generated js
-        //TODO put j2cl emul guts in here, jre - or else make them a real dep
         List<String> baseJ2clArgs = Arrays.asList("-cp", options.bytecodeClasspath, "-d", intermediateJsPath);
+
         String intermediateJsOutput = options.outputJsPath + "/temp.js";
         List<String> baseClosureArgs = new ArrayList<>(Arrays.asList("--compilation_level", CompilationLevel.BUNDLE.name(), "--js_output_file", intermediateJsOutput));
 
-        //if you don't reference the magic sauce via --js, bad things happen, and I can't quite tell why.
+        //add j2cl emul guts in here and important bits of closure-library
+        baseClosureArgs.add("--jszip");
+        baseClosureArgs.add("/Users/colin/workspace/j2cl/bootstrap.zip");
+
+        //entrypoint to the app itself (probably should bootstrap this from j2cl, not create from whole cloth)
         baseClosureArgs.add("--js");
-        baseClosureArgs.add("/Users/colin/workspace/j2cl/tmp/**/*.js");
-        baseClosureArgs.add("--js");
-        baseClosureArgs.add("/Users/colin/workspace/closure-library/closure/goog/base.js");
+        baseClosureArgs.add("/Users/colin/workspace/j2cl-tools/app.js");
+
+        baseClosureArgs.add("--entry_point");
+        baseClosureArgs.add("app");
+        baseClosureArgs.add("--dependency_mode");
+        baseClosureArgs.add(DependencyMode.STRICT.name());
+
 
         for (String zipPath : options.j2clClasspath.split(File.pathSeparator)) {
             Preconditions.checkArgument(new File(zipPath).exists() && new File(zipPath).isFile(), "jszip doesn't exist! %s", zipPath);
@@ -112,6 +122,8 @@ public class DevMode {
         }
         baseClosureArgs.add("--js");
         baseClosureArgs.add(intermediateJsPath + "/**/*.js");//precludes default package
+
+
         FileTime lastModified = FileTime.fromMillis(0);
         FileTime lastSuccess = FileTime.fromMillis(0);
         PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:**/*.java");
@@ -213,8 +225,8 @@ public class DevMode {
             }
             long jscompTime = System.currentTimeMillis() - jscompStarted;
 
+            // Insert a line at the top to allow the app to start correctly
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(intermediateJsOutput)))) {
-
                 try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(options.outputJsPath + "/app.js")))) {
                     writer.append("this[\"CLOSURE_UNCOMPILED_DEFINES\"] = {\"goog.ENABLE_DEBUG_LOADER\": false};\n");
                     String line;
