@@ -21,6 +21,8 @@ import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static com.google.common.io.Files.createTempDir;
 
@@ -58,6 +60,9 @@ public class DevMode {
         @Option(name = "-out", usage = "indicates where to write generated JS sources", required = true)
         String outputJsPath;
 
+        @Option(name = "-entrypoint", usage = "The entrypoint class", required = true)
+        String entrypoint;
+
     }
     public static void main(String[] args) throws IOException, InterruptedException, ExecutionException {
 
@@ -71,10 +76,11 @@ public class DevMode {
             System.exit(1);
         }
 
-        String intermediateJsPath = createTempDir().getPath();//TODO allow this to be configurable
+        String intermediateJsPath = createTempDir().getAbsolutePath();//TODO allow this to be configurable
 //        System.out.println("intermediate js path " + intermediateJsPath);
         File generatedClassesPath = createTempDir();//TODO allow this to be configurable
 //        System.out.println("generated classes path " + generatedClassesPath);
+        String sourcesNativeZipPath = File.createTempFile("proj-native", ".zip").getAbsolutePath();
 
         options.bytecodeClasspath += ":" + options.classesDir;
         List<File> classpath = new ArrayList<>();
@@ -95,24 +101,20 @@ public class DevMode {
         fileManager.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singleton(classesDirFile));
 
         //put all j2clClasspath items into a list, we'll copy each time and add generated js
-        List<String> baseJ2clArgs = Arrays.asList("-cp", options.bytecodeClasspath, "-d", intermediateJsPath);
+        List<String> baseJ2clArgs = Arrays.asList("-cp", options.bytecodeClasspath, "-d", intermediateJsPath, "-nativesourcepath", sourcesNativeZipPath);
 
         String intermediateJsOutput = options.outputJsPath + "/temp.js";
-        List<String> baseClosureArgs = new ArrayList<>(Arrays.asList("--compilation_level", CompilationLevel.BUNDLE.name(), "--js_output_file", intermediateJsOutput));
+        List<String> baseClosureArgs = new ArrayList<>(Arrays.asList(
+                "--compilation_level", CompilationLevel.BUNDLE.name(),
+                "--js_output_file", intermediateJsOutput,
+                "--dependency_mode", DependencyMode.STRICT.name(),
+                "--entry_point", options.entrypoint
+        ));
 
         //add j2cl emul guts in here and important bits of closure-library
+        //TODO let this be a regular dependency?
         baseClosureArgs.add("--jszip");
         baseClosureArgs.add("/Users/colin/workspace/j2cl/bootstrap.zip");
-
-        //entrypoint to the app itself (probably should bootstrap this from j2cl, not create from whole cloth)
-        baseClosureArgs.add("--js");
-        baseClosureArgs.add("/Users/colin/workspace/j2cl-tools/app.js");
-
-        baseClosureArgs.add("--entry_point");
-        baseClosureArgs.add("app");
-        baseClosureArgs.add("--dependency_mode");
-        baseClosureArgs.add(DependencyMode.STRICT.name());
-
 
         for (String zipPath : options.j2clClasspath.split(File.pathSeparator)) {
             Preconditions.checkArgument(new File(zipPath).exists() && new File(zipPath).isFile(), "jszip doesn't exist! %s", zipPath);
@@ -126,7 +128,8 @@ public class DevMode {
 
         FileTime lastModified = FileTime.fromMillis(0);
         FileTime lastSuccess = FileTime.fromMillis(0);
-        PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:**/*.java");
+        PathMatcher javaMatcher = FileSystems.getDefault().getPathMatcher("glob:**/*.java");
+        PathMatcher nativeJsMatcher = FileSystems.getDefault().getPathMatcher("glob:**/*.native.js");
 
         Compiler jsCompiler = new Compiler(System.err);
 
@@ -140,13 +143,14 @@ public class DevMode {
 
             //this isn't quite right - should check for _at least one_ newer than lastModified, and if so, recompile all
             //newer than lastSuccess
+            //also, should look for .native.js too, but not collect them
             for (String dir : options.sourceDir) {
                 Files.find(Paths.get(dir),
                         Integer.MAX_VALUE,
                         (filePath, fileAttr) -> {
                             return !fileAttr.isDirectory()
                                     && fileAttr.lastModifiedTime().compareTo(newerThan) > 0
-                                    && matcher.matches(filePath);
+                                    && javaMatcher.matches(filePath);
                         })
                         .forEach(file -> modifiedJavaFiles.add(file.toString()));
             }
@@ -157,6 +161,24 @@ public class DevMode {
             if (modifiedJavaFiles.isEmpty()) {
                 Thread.sleep(100);
                 continue;
+            }
+
+            //collect native files in zip
+            new File(sourcesNativeZipPath).delete();
+            try (ZipOutputStream zipOutputStream = new ZipOutputStream(new FileOutputStream(sourcesNativeZipPath))) {
+                for (String dir : options.sourceDir) {
+                    System.out.println("looking for native.js in " + Paths.get(dir));
+                    Files.find(Paths.get(dir), Integer.MAX_VALUE, (path, attrs) -> nativeJsMatcher.matches(path)).forEach(file -> {
+                        try {
+                            System.out.println("  found, attaching " + file + " aka " + Paths.get(dir).toAbsolutePath().relativize(file.toAbsolutePath()));
+                            zipOutputStream.putNextEntry(new ZipEntry(Paths.get(dir).toAbsolutePath().relativize(file.toAbsolutePath()).toString()));
+                            zipOutputStream.write(Files.readAllBytes(file));
+                            zipOutputStream.closeEntry();
+                        } catch (IOException e) {
+                            throw new UncheckedIOException(e);
+                        }
+                    });
+                }
             }
             
             System.out.println(modifiedJavaFiles.size() + " updated java files");
@@ -184,7 +206,7 @@ public class DevMode {
                     Integer.MAX_VALUE,
                     (filePath, fileAttr) ->
                             !fileAttr.isDirectory()
-                            && matcher.matches(filePath)
+                            && javaMatcher.matches(filePath)
                             /*TODO check modified?*/
                     ).forEach(file -> j2clArgs.add(file.toString()));
 
