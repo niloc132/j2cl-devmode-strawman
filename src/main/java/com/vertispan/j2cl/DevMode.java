@@ -164,7 +164,6 @@ public class DevMode {
             }
 
             //collect native files in zip
-            new File(sourcesNativeZipPath).delete();
             try (ZipOutputStream zipOutputStream = new ZipOutputStream(new FileOutputStream(sourcesNativeZipPath))) {
                 for (String dir : options.sourceDir) {
                     System.out.println("looking for native.js in " + Paths.get(dir));
