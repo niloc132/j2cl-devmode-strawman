@@ -1,0 +1,24 @@
+Rough attempt at some build tools:
+
+ * build.sh - production compile strawman, showing a process that could be used on each dependency to prepare its transpiled
+JS, and collect them all and build into a final optimized result
+ * devmode.sh - "dev mode" strawman - loops, while "watching" for changes in source java files, resulting in intermediate
+JS, and finally minimally compiled JS to load in the browser.
+ * bootstrap.sh - package up the various vmbootstrap, nativebootstrap, and closure-library guts required in a j2cl app.
+ * DevMode.main() - Faster/smarter strawman for dev mode. Adds the ability to correctly zip .native.js. Keeps the JVM hot
+ between builds, dramatically improving the performance of J2CL (but not jscomp. work in progress there.)
+
+The first two scripts assume that everyone loves maven, and that you plan to build the
+https://github.com/vertispan/connected/tree/no-gwt-user project, with just part of elemental2, and no other dependencies
+
+The DevMode class is more configurable, supporting a classpath for java compilation, and another for jszips, so you can pass
+in any list of jars and jszips you wish. Multiple source directories can be specified, a classes directory to store java
+bytecode in, a directory to push compiled output to, and the name of the entrypoint class (which is assumed to have a
+working .native.js to actually launch it, or the html page will have to launch it).
+
+Prerequisites:
+ * Project that can be compiled in J2CL
+ * .native.js in that project to either export symbols, or start the app. Running in BUNDLE mode is differently finicky, we're
+ going to want to standardized this...
+ * List of jszip and jar entries for their respective classpath. The java classpath list probably should contain the
+ jre.jar, and the js classpath should probably contain the bootstrap.js.zip and jre.js.zip.

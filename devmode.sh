@@ -107,6 +107,11 @@ mvn -f $pom dependency:build-classpath -Dmdep.outputFile=`pwd`/cp.txt -Dclassifi
 jszip="$base_zips --jszip `cat cp.txt | sed -e 's/:/ --jszip /g'`"
 rm cp.txt
 
+echo js classpath
+echo $jszip
+echo java classpath
+echo $j2cl_cp
+
 # spin, looking for changed files and recompiling them
 while true
 do

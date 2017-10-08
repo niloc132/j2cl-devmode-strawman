@@ -85,7 +85,7 @@ public class DevMode {
         options.bytecodeClasspath += ":" + options.classesDir;
         List<File> classpath = new ArrayList<>();
         for (String path : options.bytecodeClasspath.split(File.pathSeparator)) {
-            System.out.println(path);
+//            System.out.println(path);
             classpath.add(new File(path));
         }
 
@@ -105,16 +105,11 @@ public class DevMode {
 
         String intermediateJsOutput = options.outputJsPath + "/temp.js";
         List<String> baseClosureArgs = new ArrayList<>(Arrays.asList(
-                "--compilation_level", CompilationLevel.BUNDLE.name(),
-                "--js_output_file", intermediateJsOutput,
-                "--dependency_mode", DependencyMode.STRICT.name(),
-                "--entry_point", options.entrypoint
+                "--compilation_level", CompilationLevel.BUNDLE.name(),// fastest way to build, just smush everything together
+                "--js_output_file", intermediateJsOutput,//temp file to write to before we insert the missing line at the top
+                "--dependency_mode", DependencyMode.STRICT.name(),//force STRICT mode so that the compiler at least orders the inputs
+                "--entry_point", options.entrypoint//indicate where in the project to start when ordering dependendencies
         ));
-
-        //add j2cl emul guts in here and important bits of closure-library
-        //TODO let this be a regular dependency?
-        baseClosureArgs.add("--jszip");
-        baseClosureArgs.add("/Users/colin/workspace/j2cl/bootstrap.zip");
 
         for (String zipPath : options.j2clClasspath.split(File.pathSeparator)) {
             Preconditions.checkArgument(new File(zipPath).exists() && new File(zipPath).isFile(), "jszip doesn't exist! %s", zipPath);
@@ -166,10 +161,10 @@ public class DevMode {
             //collect native files in zip
             try (ZipOutputStream zipOutputStream = new ZipOutputStream(new FileOutputStream(sourcesNativeZipPath))) {
                 for (String dir : options.sourceDir) {
-                    System.out.println("looking for native.js in " + Paths.get(dir));
+//                    System.out.println("looking for native.js in " + Paths.get(dir));
                     Files.find(Paths.get(dir), Integer.MAX_VALUE, (path, attrs) -> nativeJsMatcher.matches(path)).forEach(file -> {
                         try {
-                            System.out.println("  found, attaching " + file + " aka " + Paths.get(dir).toAbsolutePath().relativize(file.toAbsolutePath()));
+//                            System.out.println("  found, attaching " + file + " aka " + Paths.get(dir).toAbsolutePath().relativize(file.toAbsolutePath()));
                             zipOutputStream.putNextEntry(new ZipEntry(Paths.get(dir).toAbsolutePath().relativize(file.toAbsolutePath()).toString()));
                             zipOutputStream.write(Files.readAllBytes(file));
                             zipOutputStream.closeEntry();
@@ -181,7 +176,7 @@ public class DevMode {
             }
             
             System.out.println(modifiedJavaFiles.size() + " updated java files");
-            modifiedJavaFiles.forEach(System.out::println);
+//            modifiedJavaFiles.forEach(System.out::println);
 
             // compile java files with javac into classesDir
             Iterable<? extends JavaFileObject> modifiedFileObjects = fileManager.getJavaFileObjectsFromStrings(modifiedJavaFiles);
