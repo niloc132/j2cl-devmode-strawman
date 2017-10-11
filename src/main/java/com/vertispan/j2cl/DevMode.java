@@ -3,8 +3,7 @@ package com.vertispan.j2cl;
 import com.google.common.base.Preconditions;
 import com.google.j2cl.transpiler.J2clTranspiler;
 import com.google.j2cl.transpiler.J2clTranspiler.Result;
-import com.google.javascript.jscomp.CommandLineRunner;
-import com.google.javascript.jscomp.CompilationLevel;
+import com.google.javascript.jscomp.*;
 import com.google.javascript.jscomp.Compiler;
 import com.google.javascript.jscomp.CompilerOptions.DependencyMode;
 import org.kohsuke.args4j.CmdLineException;
@@ -14,16 +13,16 @@ import org.kohsuke.args4j.Option;
 import javax.tools.*;
 import javax.tools.JavaCompiler.CompilationTask;
 import java.io.*;
-import java.nio.file.FileSystems;
-import java.nio.file.Files;
-import java.nio.file.PathMatcher;
-import java.nio.file.Paths;
+import java.nio.file.*;
 import java.nio.file.attribute.FileTime;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.io.Files.createTempDir;
 
 /**
@@ -64,7 +63,12 @@ public class DevMode {
         String entrypoint;
 
     }
-    public static void main(String[] args) throws IOException, InterruptedException, ExecutionException {
+
+    private static PathMatcher javaMatcher = FileSystems.getDefault().getPathMatcher("glob:**/*.java");
+    private static PathMatcher nativeJsMatcher = FileSystems.getDefault().getPathMatcher("glob:**/*.native.js");
+    private static PathMatcher jsMatcher = FileSystems.getDefault().getPathMatcher("glob:**/*.js");
+
+    public static void main(String[] args) throws IOException, InterruptedException, ExecutionException, NoSuchAlgorithmException {
 
         Options options = new Options();
         CmdLineParser parser = new CmdLineParser(options);
@@ -111,11 +115,16 @@ public class DevMode {
                 "--entry_point", options.entrypoint//indicate where in the project to start when ordering dependendencies
         ));
 
+        Compiler jsCompiler = new Compiler(System.err);
+        jsCompiler.setPersistentInputStore(new PersistentInputStore());
+
         for (String zipPath : options.j2clClasspath.split(File.pathSeparator)) {
             Preconditions.checkArgument(new File(zipPath).exists() && new File(zipPath).isFile(), "jszip doesn't exist! %s", zipPath);
 
             baseClosureArgs.add("--jszip");
             baseClosureArgs.add(zipPath);
+            jsCompiler.getPersistentInputStore().addInput(zipPath, "0");
+
         }
         baseClosureArgs.add("--js");
         baseClosureArgs.add(intermediateJsPath + "/**/*.js");//precludes default package
@@ -123,10 +132,6 @@ public class DevMode {
 
         FileTime lastModified = FileTime.fromMillis(0);
         FileTime lastSuccess = FileTime.fromMillis(0);
-        PathMatcher javaMatcher = FileSystems.getDefault().getPathMatcher("glob:**/*.java");
-        PathMatcher nativeJsMatcher = FileSystems.getDefault().getPathMatcher("glob:**/*.native.js");
-
-        Compiler jsCompiler = new Compiler(System.err);
 
         while (true) {
             // currently polling for changes.
@@ -226,17 +231,9 @@ public class DevMode {
                 continue;
             }
 
-            //collect all js into one artifact (currently jscomp, but it would be wonderful to not pay quite so much for this...)
-            List<String> jscompArgs = new ArrayList<>(baseClosureArgs);
-//            System.out.println(jscompArgs);
-
+            // TODO copy the generated .js files, so that we only feed the updated ones the jscomp, stop messing around with args...
             long jscompStarted = System.currentTimeMillis();
-            CommandLineRunner jscompRunner = new InProcessJsCompRunner(jscompArgs.toArray(new String[0]), jsCompiler);
-            if (!jscompRunner.shouldRunCompiler()) {
-                continue;
-            }
-            jscompRunner.run();
-            if (jscompRunner.hasErrors()) {
+            if (!jscomp(baseClosureArgs, jsCompiler, intermediateJsPath)) {
                 continue;
             }
             long jscompTime = System.currentTimeMillis() - jscompStarted;
@@ -261,7 +258,99 @@ public class DevMode {
             lastModified = nextModifiedIfSuccessful;
         }
     }
-    
+
+    private static boolean jscomp(List<String> baseClosureArgs, Compiler jsCompiler, String updatedJsDirectories) throws IOException {
+        //collect all js into one artifact (currently jscomp, but it would be wonderful to not pay quite so much for this...)
+        List<String> jscompArgs = new ArrayList<>(baseClosureArgs);
+//            System.out.println(jscompArgs);
+
+        if (jsCompiler.getModules() != null) {
+            jsCompiler.resetCompilerInput();
+        }
+
+
+        //sanity check args anyway
+        CommandLineRunner jscompRunner = new InProcessJsCompRunner(jscompArgs.toArray(new String[0]), jsCompiler);
+        if (!jscompRunner.shouldRunCompiler()) {
+            return false;
+        }
+
+        //TODO replace with PersistentInputStore, once it has been around a little longer
+
+        //for each file in the updated dir
+        long timestamp = System.currentTimeMillis();
+        Files.find(Paths.get(updatedJsDirectories), Integer.MAX_VALUE, (path, attrs) -> jsMatcher.matches(path)).forEach((Path path) -> {
+//            // this seems like a sketchy way to build inputs, but we can be confident that no one else is feeding input
+//            // js except us, so we just have to make them consistently.
+//            CompilerInput input = jsCompiler.getInput(new InputId(path.toAbsolutePath().toString()));
+//            if (input == null) {
+//                //new file, add as new ast
+//                jsCompiler.addNewScript(new JsAst(SourceFile.fromFile(path.toAbsolutePath().toString(), Charsets.UTF_8)));
+//            } else {
+//                //updated file
+//                jsCompiler.replaceScript(new JsAst(SourceFile.fromFile(path.toAbsolutePath().toString(), Charsets.UTF_8)));
+//            }
+
+            //so this isn't what they meant, but we can just mark with the timestamp of this run - we know it was updated,
+            //and we'll only mark the updated files anyway
+            jsCompiler.getPersistentInputStore().addInput(path.toString(), timestamp + "");
+            
+
+
+        });
+        //TODO how do we handle deleted files? If they are truely deleted, nothing should reference them, and the module resolution should shake them out, at only the cost of a little memory?
+
+        // instead of running the compiler (say, with the PersistentInputStore), we will do what
+        //com.google.javascript.jscomp.AbstractCommandLineRunner.outputManifestOrBundle() would try to do
+        jscompRunner.run();
+//        try (Writer out = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(outputJs), UTF_8))) {
+//            for (JSModule jsModule : jsCompiler.getModules()) {
+//                ClosureBundler bundler = new ClosureBundler();
+//
+//                List<CompilerInput> inputs = jsModule.getInputs();
+//                for (CompilerInput input : inputs) {
+//                    // Every module has an empty file in it. This makes it easier to implement
+//                    // cross-module code motion.
+//                    //
+//                    // But it also leads to a weird edge case because
+//                    // a) If we don't have a module spec, we create a singleton module, and
+//                    // b) If we print a bundle file, we copy the original input files.
+//                    //
+//                    // This means that in the (rare) case where we have no inputs, and no
+//                    // module spec, and we're printing a bundle file, we'll have a fake
+//                    // input file that shouldn't be copied. So we special-case this, to
+//                    // make all the other cases simpler.
+//
+//                    //Compiler.createFillFileName(Compiler.SINGLETON_MODULE_NAME)
+//                    if (input.getName().equals(
+//                            "$singleton$$fillFile")) {
+//                        checkState(1 == Iterables.size(inputs));
+//                        break;
+//                    }
+//
+//                    String rootRelativePath = rootRelativePathsMap.get(input.getName());
+//                    String displayName = rootRelativePath != null
+//                            ? rootRelativePath
+//                            : input.getName();
+//                    out.append("//");
+//                    out.append(displayName);
+//                    out.append("\n");
+//
+//                    bundler.appendTo(out, input, input.getSourceFile().getCode());
+//
+//                    out.append("\n");
+//                }
+//
+//            }
+//        }
+
+
+        if (jscompRunner.hasErrors()) {
+            return false;
+        }
+        return true;
+    }
+
     static class InProcessJsCompRunner extends CommandLineRunner {
         private final Compiler compiler;
         InProcessJsCompRunner(String[] args, Compiler compiler) {

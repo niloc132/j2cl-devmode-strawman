@@ -27,8 +27,8 @@
     </dependency>
     <dependency>
       <!-- snapshot lag has recovered, removing this for now -->
-      <!--<groupId>com.vertispan.javascript</groupId>-->
-      <groupId>com.google.javascript</groupId>
+      <groupId>com.vertispan.javascript</groupId>
+      <!--<groupId>com.google.javascript</groupId>-->
       <artifactId>closure-compiler</artifactId>
       <version>1.0-SNAPSHOT</version>
       <exclusions>
