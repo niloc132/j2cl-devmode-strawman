@@ -15,14 +15,12 @@ import javax.tools.JavaCompiler.CompilationTask;
 import java.io.*;
 import java.nio.file.*;
 import java.nio.file.attribute.FileTime;
-import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
-import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.io.Files.createTempDir;
 
 /**
@@ -81,7 +79,7 @@ public class DevMode {
         }
 
         String intermediateJsPath = createTempDir().getAbsolutePath();//TODO allow this to be configurable
-//        System.out.println("intermediate js path " + intermediateJsPath);
+        System.out.println("intermediate js fro j2cl path " + intermediateJsPath);
         File generatedClassesPath = createTempDir();//TODO allow this to be configurable
 //        System.out.println("generated classes path " + generatedClassesPath);
         String sourcesNativeZipPath = File.createTempFile("proj-native", ".zip").getAbsolutePath();
@@ -179,7 +177,7 @@ public class DevMode {
                     });
                 }
             }
-            
+
             System.out.println(modifiedJavaFiles.size() + " updated java files");
 //            modifiedJavaFiles.forEach(System.out::println);
 
@@ -264,89 +262,26 @@ public class DevMode {
         List<String> jscompArgs = new ArrayList<>(baseClosureArgs);
 //            System.out.println(jscompArgs);
 
-        if (jsCompiler.getModules() != null) {
-            jsCompiler.resetCompilerInput();
-        }
-
-
         //sanity check args anyway
         CommandLineRunner jscompRunner = new InProcessJsCompRunner(jscompArgs.toArray(new String[0]), jsCompiler);
         if (!jscompRunner.shouldRunCompiler()) {
             return false;
         }
 
-        //TODO replace with PersistentInputStore, once it has been around a little longer
-
         //for each file in the updated dir
         long timestamp = System.currentTimeMillis();
         Files.find(Paths.get(updatedJsDirectories), Integer.MAX_VALUE, (path, attrs) -> jsMatcher.matches(path)).forEach((Path path) -> {
-//            // this seems like a sketchy way to build inputs, but we can be confident that no one else is feeding input
-//            // js except us, so we just have to make them consistently.
-//            CompilerInput input = jsCompiler.getInput(new InputId(path.toAbsolutePath().toString()));
-//            if (input == null) {
-//                //new file, add as new ast
-//                jsCompiler.addNewScript(new JsAst(SourceFile.fromFile(path.toAbsolutePath().toString(), Charsets.UTF_8)));
-//            } else {
-//                //updated file
-//                jsCompiler.replaceScript(new JsAst(SourceFile.fromFile(path.toAbsolutePath().toString(), Charsets.UTF_8)));
-//            }
-
-            //so this isn't what they meant, but we can just mark with the timestamp of this run - we know it was updated,
-            //and we'll only mark the updated files anyway
             jsCompiler.getPersistentInputStore().addInput(path.toString(), timestamp + "");
-            
-
-
         });
-        //TODO how do we handle deleted files? If they are truely deleted, nothing should reference them, and the module resolution should shake them out, at only the cost of a little memory?
+        //TODO how do we handle deleted files? If they are truly deleted, nothing should reference them, and the module resolution should shake them out, at only the cost of a little memory?
 
-        // instead of running the compiler (say, with the PersistentInputStore), we will do what
-        //com.google.javascript.jscomp.AbstractCommandLineRunner.outputManifestOrBundle() would try to do
         jscompRunner.run();
-//        try (Writer out = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(outputJs), UTF_8))) {
-//            for (JSModule jsModule : jsCompiler.getModules()) {
-//                ClosureBundler bundler = new ClosureBundler();
-//
-//                List<CompilerInput> inputs = jsModule.getInputs();
-//                for (CompilerInput input : inputs) {
-//                    // Every module has an empty file in it. This makes it easier to implement
-//                    // cross-module code motion.
-//                    //
-//                    // But it also leads to a weird edge case because
-//                    // a) If we don't have a module spec, we create a singleton module, and
-//                    // b) If we print a bundle file, we copy the original input files.
-//                    //
-//                    // This means that in the (rare) case where we have no inputs, and no
-//                    // module spec, and we're printing a bundle file, we'll have a fake
-//                    // input file that shouldn't be copied. So we special-case this, to
-//                    // make all the other cases simpler.
-//
-//                    //Compiler.createFillFileName(Compiler.SINGLETON_MODULE_NAME)
-//                    if (input.getName().equals(
-//                            "$singleton$$fillFile")) {
-//                        checkState(1 == Iterables.size(inputs));
-//                        break;
-//                    }
-//
-//                    String rootRelativePath = rootRelativePathsMap.get(input.getName());
-//                    String displayName = rootRelativePath != null
-//                            ? rootRelativePath
-//                            : input.getName();
-//                    out.append("//");
-//                    out.append(displayName);
-//                    out.append("\n");
-//
-//                    bundler.appendTo(out, input, input.getSourceFile().getCode());
-//
-//                    out.append("\n");
-//                }
-//
-//            }
-//        }
-
 
         if (jscompRunner.hasErrors()) {
             return false;
+        }
+        if (jsCompiler.getModules() != null) {
+            jsCompiler.resetCompilerInput();
         }
         return true;
     }
