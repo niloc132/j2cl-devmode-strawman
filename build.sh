@@ -135,12 +135,12 @@ jscomp() {
     mvn dependency:copy -Dartifact=$g:$a:$v:zip:jszip -DoutputDirectory=$g
     mvn dependency:copy -Dartifact=$g:$a:$v:pom -DoutputDirectory=$g
 
-    mvn -f $g/$a-$v.pom dependency:build-classpath -Dmdep.outputFile=cp.txt -Dclassifier=jszip -Dtype=zip
+    mvn -f $g/$a-$v.pom dependency:build-classpath -Dmdep.outputFile=../cp.txt -Dclassifier=jszip -Dtype=zip
     cp=`cat cp.txt | sed -e 's/:/ --jszip /g'`
     rm cp.txt
     jszip="--jszip $cp --jszip $g/$a-$v-jszip.zip"
 
-    echo_and_run java -server -XX:+TieredCompilation \
+    echo_and_run time java -server -XX:+TieredCompilation -Xmx1g \
         -jar $CLOSURE_COMPILER_JAR \
         --entry_point 'app' \
         --js $entrypoint $jszip \
@@ -158,7 +158,7 @@ jscomp() {
         --js "$CLOSURE_LIBRARY_REPO/closure/goog/string/string.js" \
         --js "$CLOSURE_LIBRARY_REPO/closure/goog/base.js" \
         --compilation_level $level \
-        > "$5"
+        --js_output_file "$5"
 
     rm -rf $g
 }
