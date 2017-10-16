@@ -105,12 +105,13 @@ public class DevMode {
         //put all j2clClasspath items into a list, we'll copy each time and add generated js
         List<String> baseJ2clArgs = Arrays.asList("-cp", options.bytecodeClasspath, "-d", intermediateJsPath, "-nativesourcepath", sourcesNativeZipPath);
 
-        String intermediateJsOutput = options.outputJsPath + "/temp.js";
+        String intermediateJsOutput = options.outputJsPath + "/app.js";
         List<String> baseClosureArgs = new ArrayList<>(Arrays.asList(
                 "--compilation_level", CompilationLevel.BUNDLE.name(),// fastest way to build, just smush everything together
                 "--js_output_file", intermediateJsOutput,//temp file to write to before we insert the missing line at the top
                 "--dependency_mode", DependencyMode.STRICT.name(),//force STRICT mode so that the compiler at least orders the inputs
-                "--entry_point", options.entrypoint//indicate where in the project to start when ordering dependendencies
+                "--entry_point", options.entrypoint,//indicate where in the project to start when ordering dependendencies
+                "--define", "goog.ENABLE_DEBUG_LOADER=false"//TODO support more defines
         ));
 
         Compiler jsCompiler = new Compiler(System.err);
@@ -238,18 +239,6 @@ public class DevMode {
                 continue;
             }
             long jscompTime = System.currentTimeMillis() - jscompStarted;
-
-            // Insert a line at the top to allow the app to start correctly
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(intermediateJsOutput)))) {
-                try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(options.outputJsPath + "/app.js")))) {
-                    writer.append("this[\"CLOSURE_UNCOMPILED_DEFINES\"] = {\"goog.ENABLE_DEBUG_LOADER\": false};\n");
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        writer.append(line);
-                        writer.newLine();
-                    }
-                }
-            }
 
             System.out.println("Recompile of " + modifiedJavaFiles.size() + " source classes finished in " + (System.currentTimeMillis() - nextModifiedIfSuccessful.to(TimeUnit.MILLISECONDS)) + "ms");
             System.out.println("poll: " + pollTime + "millis");
