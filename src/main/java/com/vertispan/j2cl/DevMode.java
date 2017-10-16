@@ -79,7 +79,7 @@ public class DevMode {
         }
 
         String intermediateJsPath = createTempDir().getAbsolutePath();//TODO allow this to be configurable
-        System.out.println("intermediate js fro j2cl path " + intermediateJsPath);
+        System.out.println("intermediate js from j2cl path " + intermediateJsPath);
         File generatedClassesPath = createTempDir();//TODO allow this to be configurable
 //        System.out.println("generated classes path " + generatedClassesPath);
         String sourcesNativeZipPath = File.createTempFile("proj-native", ".zip").getAbsolutePath();
