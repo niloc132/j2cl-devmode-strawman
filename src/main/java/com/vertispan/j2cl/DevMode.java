@@ -60,6 +60,16 @@ public class DevMode {
         @Option(name = "-entrypoint", usage = "The entrypoint class", required = true)
         String entrypoint;
 
+        //lifted straight from closure for consistency
+        @Option(name = "--define",
+                aliases = {"--D", "-D"},
+                usage = "Override the value of a variable annotated @define. "
+                        + "The format is <name>[=<val>], where <name> is the name of a @define "
+                        + "variable and <val> is a boolean, number, or a single-quoted string "
+                        + "that contains no single quotes. If [=<val>] is omitted, "
+                        + "the variable is marked true")
+        private List<String> define = new ArrayList<>();
+
     }
 
     private static PathMatcher javaMatcher = FileSystems.getDefault().getPathMatcher("glob:**/*.java");
@@ -102,17 +112,21 @@ public class DevMode {
         Preconditions.checkState(classesDirFile.exists() && classesDirFile.isDirectory(), "either -classes does not point at a directory, or we couldn't create it");
         fileManager.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singleton(classesDirFile));
 
-        //put all j2clClasspath items into a list, we'll copy each time and add generated js
+        // put all j2clClasspath items into a list, we'll copy each time and add generated js
         List<String> baseJ2clArgs = Arrays.asList("-cp", options.bytecodeClasspath, "-d", intermediateJsPath, "-nativesourcepath", sourcesNativeZipPath);
 
         String intermediateJsOutput = options.outputJsPath + "/app.js";
         List<String> baseClosureArgs = new ArrayList<>(Arrays.asList(
                 "--compilation_level", CompilationLevel.BUNDLE.name(),// fastest way to build, just smush everything together
-                "--js_output_file", intermediateJsOutput,//temp file to write to before we insert the missing line at the top
-                "--dependency_mode", DependencyMode.STRICT.name(),//force STRICT mode so that the compiler at least orders the inputs
-                "--entry_point", options.entrypoint,//indicate where in the project to start when ordering dependendencies
-                "--define", "goog.ENABLE_DEBUG_LOADER=false"//TODO support more defines
+                "--js_output_file", intermediateJsOutput,// temp file to write to before we insert the missing line at the top
+                "--dependency_mode", DependencyMode.STRICT.name(),// force STRICT mode so that the compiler at least orders the inputs
+                "--entry_point", options.entrypoint,// indicate where in the project to start when ordering dependendencies
+                "--define", "goog.ENABLE_DEBUG_LOADER=false"// support BUNDLE mode, with no remote fetching for dependencies
         ));
+        for (String define : options.define) {
+            baseClosureArgs.add("--define");
+            baseClosureArgs.add(define);
+        }
 
         Compiler jsCompiler = new Compiler(System.err);
         // ### configure a persistent input store
