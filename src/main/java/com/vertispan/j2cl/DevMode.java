@@ -130,7 +130,7 @@ public class DevMode {
         }
 
         Compiler jsCompiler = new Compiler(System.err);
-        // ### configure a persistent input store
+        // configure a persistent input store
         jsCompiler.setPersistentInputStore(new PersistentInputStore());
 
         for (String zipPath : options.j2clClasspath.split(File.pathSeparator)) {
@@ -139,7 +139,7 @@ public class DevMode {
             baseClosureArgs.add("--jszip");
             baseClosureArgs.add(zipPath);
 
-            //### add JS zip file to the input store
+            // add JS zip file to the input store - no nice digest, since so far we don't support changes to the zip
             jsCompiler.getPersistentInputStore().addInput(zipPath, "0");
 
         }
@@ -283,10 +283,10 @@ public class DevMode {
             return false;
         }
 
-        //for each file in the updated dir
+        // for each file in the updated dir
         long timestamp = System.currentTimeMillis();
         Files.find(Paths.get(updatedJsDirectories), Integer.MAX_VALUE, (path, attrs) -> jsMatcher.matches(path)).forEach((Path path) -> {
-            //### add updated JS file to the input store
+            // add updated JS file to the input store with timestamp instead of digest for now
             jsCompiler.getPersistentInputStore().addInput(path.toString(), timestamp + "");
         });
         //TODO how do we handle deleted files? If they are truly deleted, nothing should reference them, and the module resolution should shake them out, at only the cost of a little memory?
