@@ -1,6 +1,7 @@
 package com.vertispan.j2cl;
 
 import com.google.common.base.Preconditions;
+import com.google.j2cl.generator.NativeJavaScriptFile;
 import com.google.j2cl.transpiler.J2clTranspiler;
 import com.google.j2cl.transpiler.J2clTranspiler.Result;
 import com.google.javascript.jscomp.*;
@@ -179,13 +180,11 @@ public class DevMode {
                 continue;
             }
 
-            //collect native files in zip
+            //collect native files in zip, but only if that file is also present in the changed .java sources
             try (ZipOutputStream zipOutputStream = new ZipOutputStream(new FileOutputStream(sourcesNativeZipPath))) {
                 for (String dir : options.sourceDir) {
-//                    System.out.println("looking for native.js in " + Paths.get(dir));
-                    Files.find(Paths.get(dir), Integer.MAX_VALUE, (path, attrs) -> nativeJsMatcher.matches(path)).forEach(file -> {
+                    Files.find(Paths.get(dir), Integer.MAX_VALUE, (path, attrs) -> shouldZip(path, modifiedJavaFiles)).forEach(file -> {
                         try {
-//                            System.out.println("  found, attaching " + file + " aka " + Paths.get(dir).toAbsolutePath().relativize(file.toAbsolutePath()));
                             zipOutputStream.putNextEntry(new ZipEntry(Paths.get(dir).toAbsolutePath().relativize(file.toAbsolutePath()).toString()));
                             zipOutputStream.write(Files.readAllBytes(file));
                             zipOutputStream.closeEntry();
@@ -261,6 +260,16 @@ public class DevMode {
             System.out.println("jscomp: " + jscompTime + "millis");
             lastModified = nextModifiedIfSuccessful;
         }
+    }
+
+    private static boolean shouldZip(Path path, List<String> modifiedJavaFiles) {
+        return nativeJsMatcher.matches(path) && matchesChangedJavaFile(path, modifiedJavaFiles);
+    }
+
+    private static boolean matchesChangedJavaFile(Path path, List<String> modifiedJavaFiles) {
+        String pathString = path.toString();
+        String nativeFilePath = pathString.substring(0, pathString.lastIndexOf(NativeJavaScriptFile.NATIVE_EXTENSION));
+        return modifiedJavaFiles.stream().anyMatch(javaPath -> javaPath.startsWith(nativeFilePath));
     }
 
     private static boolean jscomp(List<String> baseClosureArgs, Compiler jsCompiler, String updatedJsDirectories) throws IOException {
