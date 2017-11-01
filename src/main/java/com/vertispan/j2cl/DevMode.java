@@ -239,7 +239,7 @@ public class DevMode {
             });
             Result transpileResult = futureResult.get();
             long j2clTime = System.currentTimeMillis() - j2clStarted;
-            transpileResult.getProblems().report(System.out, System.err);
+            transpileResult.getProblems().report(System.err);
             executorService.shutdownNow();//technically the finalizer will call shutdown, but we can cleanup now
             if (transpileResult.getExitCode() != 0) {
                 //print problems
