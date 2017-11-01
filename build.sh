@@ -21,9 +21,14 @@ base_cp="$J2CL_REPO/bazel-bin/jre/java/jre.jar"
 
 # Call j2cl directly
 J2clTranspiler() {
-  $J2CL_REPO/bazel-bin/transpiler/java/com/google/j2cl/transpiler/J2clTranspiler "$@"
+  echo $J2CL_REPO/bazel-bin/transpiler/java/com/google/j2cl/transpiler/J2clTranspiler "$@"
+  time $J2CL_REPO/bazel-bin/transpiler/java/com/google/j2cl/transpiler/J2clTranspiler "$@"
 }
 
+GwtIncompatibleStripper() {
+  $J2CL_REPO/bazel-bin/tools/java/com/google/j2cl/tools/gwtincompatible/GwtIncompatibleStripper "$@"
+#  $J2CL_REPO/bazel-bin/internal_do_not_use/GwtIncompatibleStripper "$@"
+}
 # An apparently deprecated tool, first cut toward a "dev mode" sort of env. Currently this output is unused,
 # but it is important to note that building and including it into the jszip doesn't negatively impact jscomp.
 depswriter() {
@@ -58,21 +63,25 @@ j2cl_compile_mvn_jar() {
 
     noprefix=${jar%.jar};
     srcjar="$noprefix.srcjar";
+    strippedsrcjar="$noprefix-stripped.srcjar";
     cp "$jar" "$srcjar";
+
+    GwtIncompatibleStripper -d $strippedsrcjar $srcjar
 
     mvn -f $g/$a-$v.pom dependency:build-classpath -Dmdep.outputFile=../cp.txt
     cp=`cat cp.txt`
     rm cp.txt
 
     mkdir out
-    J2clTranspiler -cp "$base_cp:$cp" -d "out" "$srcjar"
+    J2clTranspiler -cp "$base_cp:$cp" -d "out" "$strippedsrcjar"
     depswriter --root out/ > "out/$a-$v-deps.txt"
 
     pushd out
     zip -r ../$g/$a-$v.js.zip *
     popd
+#    exit;
 
-    mvn install:install-file -Dpackaging=zip -Dclassifier=jszip -DgroupId=$g -DartifactId=$a -Dversion=$v -Dfile=$g/$a-$v.js.zip
+    mvn install:install-file -DrepositoryId=vertispan-releases -Durl=https://repo.vertispan.com/j2cl -Dpackaging=zip -Dclassifier=jszip -DgroupId=$g -DartifactId=$a -Dversion=$v -Dfile=$g/$a-$v.js.zip -Dpom=$g/pom.xml
 
     rm -rf out
     rm -rf $g
@@ -113,7 +122,7 @@ j2cl_compile_interop_base_bug() {
     zip -r ../com.google.jsinterop/base-1.0.0-beta-1.js.zip *
     popd
 
-    mvn install:install-file -Dpackaging=zip -Dclassifier=jszip -DgroupId=com.google.jsinterop -DartifactId=base -Dversion=1.0.0-beta-1 -Dfile=com.google.jsinterop/base-1.0.0-beta-1.js.zip
+    mvn install:install-file -DrepositoryId=vertispan-releases -Durl=https://repo.vertispan.com/j2cl -Dpackaging=zip -Dclassifier=jszip -DgroupId=com.google.jsinterop -DartifactId=base -Dversion=1.0.0-beta-1 -Dfile=com.google.jsinterop/base-1.0.0-beta-1.js.zip
 
     rm -rf out
     rm -rf com.google.jsinterop
@@ -173,6 +182,12 @@ j2cl_compile_interop_base_bug
 j2cl_compile_mvn_jar com.google.elemental2 elemental2-core 1.0.0-beta-1 jar
 j2cl_compile_mvn_jar com.google.elemental2 elemental2-promise 1.0.0-beta-1 jar
 j2cl_compile_mvn_jar com.google.elemental2 elemental2-dom 1.0.0-beta-1 jar
+
+#j2cl_compile_mvn_jar com.google.guava guava-gwt HEAD-jre-SNAPSHOT jar
+#j2cl_compile_mvn_jar io.playn playn-html 2.1-SNAPSHOT jar sources
+#j2cl_compile_mvn_jar superstore concurrent-trees 2.6.0 jar
+#j2cl_compile_mvn_jar superstore cqengine 2.7.1 jar
+
 #TODO add more as needed
 
 
