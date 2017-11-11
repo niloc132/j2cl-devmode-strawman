@@ -22,3 +22,30 @@ Prerequisites:
  going to want to standardized this...
  * List of jszip and jar entries for their respective classpath. The java classpath list probably should contain the
  jre.jar, and the js classpath should probably contain the bootstrap.js.zip and jre.js.zip.
+
+
+
+---
+
+Build process, and assumptions:
+
+Assuming:
+ * No globally consistent version of j2cl (requires local cache clearing as needed)
+   * No or partially distributed `.j2.zip`s (would require versioning by j2cl, re-releasing by entire ecosystem for any incremental release)
+ * Closure will continue to error on duplicate declared modules
+ * External (not in jre.jar) "supersource" still matters (i.e. gwt will not accept any arbitrary emulation)
+ * Dependencies which supersource themselves still are permitted to be used
+
+
+Steps:
+ * unpack all .js.zip that are provided (may be as little as jre.js.zip and bootstrap.js.zip)
+ * precompile all source jar dependencies (possibly checking a cache and skipping some if up to date)
+   * this includes preprocessing, since the preprocessor is tied to the compiler and may change
+   * this also required de-duping "self-supersourced" classes, as j2cl doesn't allow dups
+ * unpack all upstream .js.zips to a single dir in order of java classpath (allowing some types to override others)
+ * (if incremental, or if we don't assume already javac'd for apt) javac all current sources
+ * discover, skip any types which are "self-supersourced" within the project
+ * transpile all current sources and current generated sources to the same dir as dependency output
+ * (missing) resolve properties, permutations
+ * Run closure on all generated js, including entrypoint and defines
+ * (missing) link permutations

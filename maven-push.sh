@@ -23,7 +23,7 @@ mvn $GOAL -DrepositoryId=vertispan-releases -Durl=https://repo.vertispan.com/j2c
 # Transpiler itself (and eventually other jars
 pushd $J2CL_REPO/transpiler
 # TODO this doesn't respect the GROUPID above, you'll need to tweak this too
-mvn clean install -Dpackage
+mvn clean install -Ppackage
 popd
 
 # JRE

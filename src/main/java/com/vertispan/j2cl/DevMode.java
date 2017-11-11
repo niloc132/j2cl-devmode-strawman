@@ -29,8 +29,8 @@ import static com.google.common.io.Files.createTempDir;
  * isn't intended to be a proposal, just another experiment on the way to one.
  *
  * Assumptions:
- *   o The js-compatible JRE is already on the classpath. Probably not a good one, but on the other hand, we
- *     may want to allow changing out the JRE (or skipping it) in favor of something else.
+ *   o The js-compatible JRE is already on the java classpath (need not be on js). Probably not a good one, but
+ *     on the other hand, we may want to allow changing out the JRE (or skipping it) in favor of something else.
  *   o A JS entrypoint already exists. Probably safe, should get some APT going soon as discussed, at least to
  *     try it out.
  *
@@ -41,25 +41,31 @@ import static com.google.common.io.Files.createTempDir;
  *
  * Not so good:
  *   o J2CL seems deliberately difficult to integrate (no public, uses threadlocals)
- *   o Haven't yet worked out how to get Closure to notice incremental changes, may be easier to do this by hand.
+ *   o Not correctly recompiling classes that require it based on dependencies
  *   o Not at all convinced my javac wiring is correct
  *   o Polling for changes
  */
 public class DevMode {
     public static class Options {
         @Option(name = "-src", usage = "specify one or more java source directories", required = true)
-        List<String> sourceDir;
-        @Option(name = "-classes", usage = "provide a directory to put compiled bytecode in", required = true)
-        String classesDir;
-        @Option(name = "-jsClasspath", usage = "specify js archive classpath", required = true)
-        String j2clClasspath;
+        List<String> sourceDir = new ArrayList<>();
         @Option(name = "-classpath", usage = "specify java classpath", required = true)
         String bytecodeClasspath;
-        @Option(name = "-out", usage = "indicates where to write generated JS sources", required = true)
-        String outputJsPath;
+
+        @Option(name = "-jsClasspath", usage = "specify js archive classpath that won't be transpiled from sources or classpath. If nothing else, should include bootstrap.js.zip", required = true)
+        String j2clClasspath;
+
+        @Option(name = "-out", usage = "indicates where to write generated JS sources, sourcemaps, etc. Should be a directory specific to gwt, anything may be overwritten there.", required = true)
+        String outputJsPathDir;
+
+        @Option(name = "-classes", usage = "provide a directory to put compiled bytecode in. if not specified, a tmp dir will be used", required = false)
+        String classesDir;
 
         @Option(name = "-entrypoint", usage = "The entrypoint class", required = true)
-        String entrypoint;
+        List<String> entrypoint = new ArrayList<>();
+
+        @Option(name = "-jsZipCache", usage = "directory to cache generated jszips in. Should be cleared when j2cl version changes")
+        String jsZipCacheDir;
 
         //lifted straight from closure for consistency
         @Option(name = "--define",
@@ -89,7 +95,8 @@ public class DevMode {
             System.exit(1);
         }
 
-        String intermediateJsPath = createTempDir().getAbsolutePath();//TODO allow this to be configurable
+
+        String intermediateJsPath = createDir(options.outputJsPathDir + "/sources").getPath();
         System.out.println("intermediate js from j2cl path " + intermediateJsPath);
         File generatedClassesPath = createTempDir();//TODO allow this to be configurable
 //        System.out.println("generated classes path " + generatedClassesPath);
@@ -108,25 +115,31 @@ public class DevMode {
         fileManager.setLocation(StandardLocation.SOURCE_PATH, Collections.emptyList());
         fileManager.setLocation(StandardLocation.SOURCE_OUTPUT, Collections.singleton(generatedClassesPath));
         fileManager.setLocation(StandardLocation.CLASS_PATH, classpath);
-        File classesDirFile = new File(options.classesDir);
-        classesDirFile.mkdirs();
-        Preconditions.checkState(classesDirFile.exists() && classesDirFile.isDirectory(), "either -classes does not point at a directory, or we couldn't create it");
+        File classesDirFile;
+        if (options.classesDir != null) {
+            classesDirFile = createDir(options.classesDir);
+        } else {
+            classesDirFile = createTempDir();
+        }
         fileManager.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singleton(classesDirFile));
 
         // put all j2clClasspath items into a list, we'll copy each time and add generated js
         List<String> baseJ2clArgs = Arrays.asList("-cp", options.bytecodeClasspath, "-d", intermediateJsPath, "-nativesourcepath", sourcesNativeZipPath);
 
-        String intermediateJsOutput = options.outputJsPath + "/app.js";
+        String intermediateJsOutput = options.outputJsPathDir + "/app.js";
         List<String> baseClosureArgs = new ArrayList<>(Arrays.asList(
                 "--compilation_level", CompilationLevel.BUNDLE.name(),// fastest way to build, just smush everything together
                 "--js_output_file", intermediateJsOutput,// temp file to write to before we insert the missing line at the top
                 "--dependency_mode", DependencyMode.STRICT.name(),// force STRICT mode so that the compiler at least orders the inputs
-                "--entry_point", options.entrypoint,// indicate where in the project to start when ordering dependendencies
                 "--define", "goog.ENABLE_DEBUG_LOADER=false"// support BUNDLE mode, with no remote fetching for dependencies
         ));
         for (String define : options.define) {
             baseClosureArgs.add("--define");
             baseClosureArgs.add(define);
+        }
+        for (String entrypoint : options.entrypoint) {
+            baseClosureArgs.add("--entry_point");
+            baseClosureArgs.add(entrypoint);
         }
 
         Compiler jsCompiler = new Compiler(System.err);
@@ -145,6 +158,28 @@ public class DevMode {
         }
         baseClosureArgs.add("--js");
         baseClosureArgs.add(intermediateJsPath + "/**/*.js");//precludes default package
+
+        //pre-transpile all dependency sources to our cache dir, add those cached items to closure args
+        for (File file : classpath) {
+            //TODO maybe skip certain files that have already been transpiled
+            if (file.isDirectory()) {
+                continue;//...hacky, but probably just classes dir
+            }
+            //TODO run preprocessor
+
+            List<String> pretranspile = new ArrayList<>();
+            String jszipOut = options.jsZipCacheDir + "/" + file.getAbsolutePath() + ".js.zip";
+            pretranspile.addAll(Arrays.asList("-cp", options.bytecodeClasspath, "-d", jszipOut, file.getAbsolutePath()));
+            Result result = transpile(pretranspile);
+            if (result.getExitCode() == 0) {
+                baseClosureArgs.add("--jszip");
+                baseClosureArgs.add(jszipOut);
+
+                jsCompiler.getPersistentInputStore().addInput(jszipOut, "0");
+            } //ignoring failure for now, TODO don't!
+        }
+
+
 
 
         FileTime lastModified = FileTime.fromMillis(0);
@@ -224,27 +259,16 @@ public class DevMode {
                             /*TODO check modified?*/
                     ).forEach(file -> j2clArgs.add(file.toString()));
 
+            //TODO run preprocessor
 
-            //recompile java->js
-//            System.out.println(j2clArgs);
-
-            // Sadly, can't do this, each run of the transpiler MUST be in its own thread, since it
-            // can't seem to clean up its threadlocals.
             long j2clStarted = System.currentTimeMillis();
-//            Result transpileResult = transpiler.transpile(j2clArgs.toArray(new String[0]));
-            ExecutorService executorService = Executors.newSingleThreadExecutor();
-            Future<Result> futureResult = executorService.submit(() -> {
-                J2clTranspiler transpiler = new J2clTranspiler();
-                return transpiler.transpile(j2clArgs.toArray(new String[0]));
-            });
-            Result transpileResult = futureResult.get();
-            long j2clTime = System.currentTimeMillis() - j2clStarted;
-            transpileResult.getProblems().report(System.err);
-            executorService.shutdownNow();//technically the finalizer will call shutdown, but we can cleanup now
+            Result transpileResult = transpile(j2clArgs);
+
             if (transpileResult.getExitCode() != 0) {
                 //print problems
                 continue;
             }
+            long j2clTime = System.currentTimeMillis() - j2clStarted;
 
             // TODO copy the generated .js files, so that we only feed the updated ones the jscomp, stop messing around with args...
             long jscompStarted = System.currentTimeMillis();
@@ -260,6 +284,34 @@ public class DevMode {
             System.out.println("jscomp: " + jscompTime + "millis");
             lastModified = nextModifiedIfSuccessful;
         }
+    }
+
+    private static Result transpile(List<String> j2clArgs) throws InterruptedException, ExecutionException {
+        //recompile java->js
+//            System.out.println(j2clArgs);
+
+        // Sadly, can't do this, each run of the transpiler MUST be in its own thread, since it
+        // can't seem to clean up its threadlocals.
+//            Result transpileResult = transpiler.transpile(j2clArgs.toArray(new String[0]));
+        ExecutorService executorService = Executors.newSingleThreadExecutor();
+        Future<Result> futureResult = executorService.submit(() -> {
+            J2clTranspiler transpiler = new J2clTranspiler();
+            return transpiler.transpile(j2clArgs.toArray(new String[0]));
+        });
+        Result transpileResult = futureResult.get();
+        transpileResult.getProblems().report(System.err);
+        executorService.shutdownNow();//technically the finalizer will call shutdown, but we can cleanup now
+        return transpileResult;
+    }
+
+    private static File createDir(String path) {
+        File f = new File(path);
+        if (f.exists()) {
+            Preconditions.checkState(f.isDirectory(), "path already exists but is not a directory " + path);
+        } else if (!f.mkdirs()) {
+            throw new IllegalStateException("Failed to create directory " + path);
+        }
+        return f;
     }
 
     private static boolean shouldZip(Path path, List<String> modifiedJavaFiles) {
