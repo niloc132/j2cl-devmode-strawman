@@ -7,7 +7,7 @@ J2CL_REPO=/Users/colin/workspace/j2cl
 GROUP_ID=com.vertispan.j2cl
 
 GOAL='install:install-file'
-if [ $1 = "deploy" ]
+if [[ $1 = "deploy" ]]
 then
     GOAL='deploy:deploy-file'
 fi

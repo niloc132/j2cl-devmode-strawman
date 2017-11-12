@@ -16,7 +16,7 @@ CLOSURE_COMPILER_JAR=/Users/colin/workspace/closure-compiler/target/closure-comp
 # Finally, skip down to the end of the file to customize what dependencies you build, compile.
 
 
-base_cp="$J2CL_REPO/bazel-bin/jre/java/jre.jar"
+base_cp="$J2CL_REPO/bazel-bin/jre/java/jre.jar:$J2CL_REPO/bazel-bin/external/org_gwtproject_gwt/user/libgwt-javaemul-internal-annotations.jar"
 
 
 # Call j2cl directly
@@ -91,38 +91,39 @@ j2cl_compile_mvn_jar() {
 # gwt-only code and re-inserts missing @JsMethods. Replacement for
 #   $ j2cl_compile_mvn_jar com.google.jsinterop base 1.0.0-beta-1 jar
 j2cl_compile_interop_base_bug() {
+    v=1.0.0-beta-3
 
-    mvn dependency:copy -Dartifact=com.google.jsinterop:base:1.0.0-beta-1:jar -DoutputDirectory=com.google.jsinterop
-    mvn dependency:copy -Dartifact=com.google.jsinterop:base:1.0.0-beta-1:pom -DoutputDirectory=com.google.jsinterop
+    mvn dependency:copy -Dartifact=com.google.jsinterop:base:$v:jar -DoutputDirectory=com.google.jsinterop
+    mvn dependency:copy -Dartifact=com.google.jsinterop:base:$v:pom -DoutputDirectory=com.google.jsinterop
 
     pushd com.google.jsinterop
-    unzip base-1.0.0-beta-1.jar
+    unzip base-$v.jar
 
     pushd jsinterop/base/
     ls *.java | xargs sed -e 's/\/\/J2CL_ONLY //g' -i ''
-    ls *.java | xargs sed -e '/  @UncheckedCast/d' -i ''
-    ls *.java | xargs sed -e '/  @HasNoSideEffects/d' -i ''
+#    ls *.java | xargs sed -e '/  @UncheckedCast/d' -i ''
+#    ls *.java | xargs sed -e '/  @HasNoSideEffects/d' -i ''
     ls *.java | xargs sed -e '/  @UnsafeNativeLong/d' -i ''
-    ls *.java | xargs sed -e '/import javaemul.internal.annotations.UncheckedCast;/d' -i ''
-    ls *.java | xargs sed -e '/import javaemul.internal.annotations.HasNoSideEffects;/d' -i ''
+#    ls *.java | xargs sed -e '/import javaemul.internal.annotations.UncheckedCast;/d' -i ''
+#    ls *.java | xargs sed -e '/import javaemul.internal.annotations.HasNoSideEffects;/d' -i ''
     ls *.java | xargs sed -e '/import com.google.gwt.core.client.UnsafeNativeLong;/d' -i ''
 
     popd
     popd
 
-    mvn -f com.google.jsinterop/base-1.0.0-beta-1.pom dependency:build-classpath -Dmdep.outputFile=../cp.txt
+    mvn -f com.google.jsinterop/base-$v.pom dependency:build-classpath -Dmdep.outputFile=../cp.txt
     cp=`cat cp.txt`
     rm cp.txt
 
     mkdir out
     J2clTranspiler -cp "$base_cp:$cp" -d "out" com.google.jsinterop/jsinterop/base/*.java
-    depswriter --root out/ > out/base-1.0.0-beta-1-deps.txt
+    depswriter --root out/ > out/base-$v-deps.txt
     
     pushd out
-    zip -r ../com.google.jsinterop/base-1.0.0-beta-1.js.zip *
+    zip -r ../com.google.jsinterop/base-$v.js.zip *
     popd
 
-    mvn install:install-file -DrepositoryId=vertispan-releases -Durl=https://repo.vertispan.com/j2cl -Dpackaging=zip -Dclassifier=jszip -DgroupId=com.google.jsinterop -DartifactId=base -Dversion=1.0.0-beta-1 -Dfile=com.google.jsinterop/base-1.0.0-beta-1.js.zip
+    mvn install:install-file -DrepositoryId=vertispan-releases -Durl=https://repo.vertispan.com/j2cl -Dpackaging=zip -Dclassifier=jszip -DgroupId=com.google.jsinterop -DartifactId=base -Dversion=$v -Dfile=com.google.jsinterop/base-$v.js.zip
 
     rm -rf out
     rm -rf com.google.jsinterop
