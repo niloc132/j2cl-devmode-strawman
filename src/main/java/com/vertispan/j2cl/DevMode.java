@@ -1,7 +1,11 @@
 package com.vertispan.j2cl;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
+import com.google.j2cl.common.Problems;
+import com.google.j2cl.frontend.FrontendUtils;
 import com.google.j2cl.generator.NativeJavaScriptFile;
+import com.google.j2cl.tools.gwtincompatible.JavaPreprocessor;
 import com.google.j2cl.transpiler.J2clTranspiler;
 import com.google.j2cl.transpiler.J2clTranspiler.Result;
 import com.google.javascript.jscomp.*;
@@ -95,7 +99,6 @@ public class DevMode {
             System.exit(1);
         }
 
-
         String intermediateJsPath = createDir(options.outputJsPathDir + "/sources").getPath();
         System.out.println("intermediate js from j2cl path " + intermediateJsPath);
         File generatedClassesPath = createTempDir();//TODO allow this to be configurable
@@ -124,15 +127,21 @@ public class DevMode {
         fileManager.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singleton(classesDirFile));
 
         // put all j2clClasspath items into a list, we'll copy each time and add generated js
-        List<String> baseJ2clArgs = Arrays.asList("-cp", options.bytecodeClasspath, "-d", intermediateJsPath, "-nativesourcepath", sourcesNativeZipPath);
+        List<String> baseJ2clArgs = Arrays.asList("-cp", options.bytecodeClasspath, "-d", intermediateJsPath);
 
         String intermediateJsOutput = options.outputJsPathDir + "/app.js";
+        CompilationLevel compilationLevel = CompilationLevel.BUNDLE;
         List<String> baseClosureArgs = new ArrayList<>(Arrays.asList(
-                "--compilation_level", CompilationLevel.BUNDLE.name(),// fastest way to build, just smush everything together
+                "--compilation_level", compilationLevel.name(),// fastest way to build, just smush everything together
                 "--js_output_file", intermediateJsOutput,// temp file to write to before we insert the missing line at the top
-                "--dependency_mode", DependencyMode.STRICT.name(),// force STRICT mode so that the compiler at least orders the inputs
-                "--define", "goog.ENABLE_DEBUG_LOADER=false"// support BUNDLE mode, with no remote fetching for dependencies
+                "--dependency_mode", DependencyMode.STRICT.name()// force STRICT mode so that the compiler at least orders the inputs
         ));
+        if (compilationLevel == CompilationLevel.BUNDLE) {
+            // support BUNDLE mode, with no remote fetching for dependencies)
+            baseClosureArgs.add("--define");
+            baseClosureArgs.add( "goog.ENABLE_DEBUG_LOADER=false");
+        }
+
         for (String define : options.define) {
             baseClosureArgs.add("--define");
             baseClosureArgs.add(define);
@@ -142,9 +151,9 @@ public class DevMode {
             baseClosureArgs.add(entrypoint);
         }
 
-        Compiler jsCompiler = new Compiler(System.err);
-        // configure a persistent input store
-        jsCompiler.setPersistentInputStore(new PersistentInputStore());
+        // configure a persistent input store - we'll reuse this and not the compiler for now, to cache the ASTs,
+        // and still allow jscomp to be in modes other than BUNDLE
+        PersistentInputStore persistentInputStore = new PersistentInputStore();
 
         for (String zipPath : options.j2clClasspath.split(File.pathSeparator)) {
             Preconditions.checkArgument(new File(zipPath).exists() && new File(zipPath).isFile(), "jszip doesn't exist! %s", zipPath);
@@ -153,8 +162,7 @@ public class DevMode {
             baseClosureArgs.add(zipPath);
 
             // add JS zip file to the input store - no nice digest, since so far we don't support changes to the zip
-            jsCompiler.getPersistentInputStore().addInput(zipPath, "0");
-
+            persistentInputStore.addInput(zipPath, "0");
         }
         baseClosureArgs.add("--js");
         baseClosureArgs.add(intermediateJsPath + "/**/*.js");//precludes default package
@@ -165,18 +173,33 @@ public class DevMode {
             if (file.isDirectory()) {
                 continue;//...hacky, but probably just classes dir
             }
-            //TODO run preprocessor
 
-            List<String> pretranspile = new ArrayList<>();
+            // run preprocessor
+            File processed = File.createTempFile("preprocessed", ".srcjar");
+            try (FileSystem out = FrontendUtils.initZipOutput(processed.getAbsolutePath(), new Problems())) {
+                ImmutableList<String> allSources = FrontendUtils.getAllSources(Collections.singletonList(file.getAbsolutePath()), new Problems());
+                if (allSources.isEmpty()) {
+                    System.out.println("no sources in file " + file);
+                    continue;
+                }
+                JavaPreprocessor.preprocessFiles(allSources, out, new Problems());
+            }
+
+            List<String> pretranspile = new ArrayList<>(baseJ2clArgs);
             String jszipOut = options.jsZipCacheDir + "/" + file.getAbsolutePath() + ".js.zip";
-            pretranspile.addAll(Arrays.asList("-cp", options.bytecodeClasspath, "-d", jszipOut, file.getAbsolutePath()));
+            pretranspile.addAll(Arrays.asList("-cp", options.bytecodeClasspath, "-d", jszipOut, processed.getAbsolutePath()));
             Result result = transpile(pretranspile);
+
+            processed.delete();
             if (result.getExitCode() == 0) {
                 baseClosureArgs.add("--jszip");
                 baseClosureArgs.add(jszipOut);
 
-                jsCompiler.getPersistentInputStore().addInput(jszipOut, "0");
+                persistentInputStore.addInput(jszipOut, "0");
             } //ignoring failure for now, TODO don't!
+            else {
+                System.out.println("Failed compiling " + file);
+            }
         }
 
 
@@ -216,17 +239,19 @@ public class DevMode {
             }
 
             //collect native files in zip, but only if that file is also present in the changed .java sources
+            boolean anyNativeJs = false;
             try (ZipOutputStream zipOutputStream = new ZipOutputStream(new FileOutputStream(sourcesNativeZipPath))) {
                 for (String dir : options.sourceDir) {
-                    Files.find(Paths.get(dir), Integer.MAX_VALUE, (path, attrs) -> shouldZip(path, modifiedJavaFiles)).forEach(file -> {
+                    anyNativeJs |= Files.find(Paths.get(dir), Integer.MAX_VALUE, (path, attrs) -> shouldZip(path, modifiedJavaFiles)).reduce(false, (ignore, file) -> {
                         try {
                             zipOutputStream.putNextEntry(new ZipEntry(Paths.get(dir).toAbsolutePath().relativize(file.toAbsolutePath()).toString()));
                             zipOutputStream.write(Files.readAllBytes(file));
                             zipOutputStream.closeEntry();
+                            return true;
                         } catch (IOException e) {
                             throw new UncheckedIOException(e);
                         }
-                    });
+                    }, (a, b) -> a || b);
                 }
             }
 
@@ -246,10 +271,8 @@ public class DevMode {
             }
             long javacTime = System.currentTimeMillis() - javacStarted;
 
-            List<String> j2clArgs = new ArrayList<>(baseJ2clArgs);
             // add all modified Java files
             //TODO don't just use all generated classes, but look for changes maybe?
-            j2clArgs.addAll(modifiedJavaFiles);
 
             Files.find(Paths.get(generatedClassesPath.getAbsolutePath()),
                     Integer.MAX_VALUE,
@@ -257,12 +280,26 @@ public class DevMode {
                             !fileAttr.isDirectory()
                             && javaMatcher.matches(filePath)
                             /*TODO check modified?*/
-                    ).forEach(file -> j2clArgs.add(file.toString()));
+                    ).forEach(file -> modifiedJavaFiles.add(file.toString()));
 
-            //TODO run preprocessor
+            // run preprocessor on changed files
+            File processed = File.createTempFile("preprocessed", ".srcjar");
+            try (FileSystem out = FrontendUtils.initZipOutput(processed.getAbsolutePath(), new Problems())) {
+                JavaPreprocessor.preprocessFiles(modifiedJavaFiles, out, new Problems());
+            }
+
+            List<String> j2clArgs = new ArrayList<>(baseJ2clArgs);
+            if (anyNativeJs) {
+                j2clArgs.add("-nativesourcepath");
+                j2clArgs.add(sourcesNativeZipPath);
+            }
+            j2clArgs.add(processed.getAbsolutePath());
 
             long j2clStarted = System.currentTimeMillis();
             Result transpileResult = transpile(j2clArgs);
+//            System.out.println(j2clArgs);
+
+            processed.delete();
 
             if (transpileResult.getExitCode() != 0) {
                 //print problems
@@ -272,7 +309,7 @@ public class DevMode {
 
             // TODO copy the generated .js files, so that we only feed the updated ones the jscomp, stop messing around with args...
             long jscompStarted = System.currentTimeMillis();
-            if (!jscomp(baseClosureArgs, jsCompiler, intermediateJsPath)) {
+            if (!jscomp(baseClosureArgs, persistentInputStore, intermediateJsPath)) {
                 continue;
             }
             long jscompTime = System.currentTimeMillis() - jscompStarted;
@@ -324,12 +361,16 @@ public class DevMode {
         return modifiedJavaFiles.stream().anyMatch(javaPath -> javaPath.startsWith(nativeFilePath));
     }
 
-    private static boolean jscomp(List<String> baseClosureArgs, Compiler jsCompiler, String updatedJsDirectories) throws IOException {
-        //collect all js into one artifact (currently jscomp, but it would be wonderful to not pay quite so much for this...)
+    private static boolean jscomp(List<String> baseClosureArgs, PersistentInputStore persistentInputStore, String updatedJsDirectories) throws IOException {
+        // collect all js into one artifact (currently jscomp, but it would be wonderful to not pay quite so much for this...)
         List<String> jscompArgs = new ArrayList<>(baseClosureArgs);
-//            System.out.println(jscompArgs);
+        System.out.println(jscompArgs);
 
-        //sanity check args anyway
+        // Build a new compiler for this run, but share the cached js ASTs
+        Compiler jsCompiler = new Compiler(System.err);
+        jsCompiler.setPersistentInputStore(persistentInputStore);
+
+        // sanity check args
         CommandLineRunner jscompRunner = new InProcessJsCompRunner(jscompArgs.toArray(new String[0]), jsCompiler);
         if (!jscompRunner.shouldRunCompiler()) {
             return false;
@@ -339,7 +380,7 @@ public class DevMode {
         long timestamp = System.currentTimeMillis();
         Files.find(Paths.get(updatedJsDirectories), Integer.MAX_VALUE, (path, attrs) -> jsMatcher.matches(path)).forEach((Path path) -> {
             // add updated JS file to the input store with timestamp instead of digest for now
-            jsCompiler.getPersistentInputStore().addInput(path.toString(), timestamp + "");
+            persistentInputStore.addInput(path.toString(), timestamp + "");
         });
         //TODO how do we handle deleted files? If they are truly deleted, nothing should reference them, and the module resolution should shake them out, at only the cost of a little memory?
 
@@ -349,7 +390,7 @@ public class DevMode {
             return false;
         }
         if (jsCompiler.getModules() != null) {
-            // ### clear out the compiler input for the next goaround
+            // clear out the compiler input for the next goaround
             jsCompiler.resetCompilerInput();
         }
         return true;

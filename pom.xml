@@ -26,6 +26,11 @@
       </exclusions>
     </dependency>
     <dependency>
+      <groupId>com.vertispan.j2cl</groupId>
+      <artifactId>gwt-incompatible-stripper</artifactId>
+      <version>0.1-SNAPSHOT</version>
+    </dependency>
+    <dependency>
       <!-- snapshot lag has recovered, removing this for now -->
       <groupId>com.vertispan.javascript</groupId>
       <!--<groupId>com.google.javascript</groupId>-->
