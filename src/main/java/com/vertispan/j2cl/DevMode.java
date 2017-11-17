@@ -399,7 +399,7 @@ public class DevMode {
     private static boolean jscomp(List<String> baseClosureArgs, PersistentInputStore persistentInputStore, String updatedJsDirectories) throws IOException {
         // collect all js into one artifact (currently jscomp, but it would be wonderful to not pay quite so much for this...)
         List<String> jscompArgs = new ArrayList<>(baseClosureArgs);
-        System.out.println(jscompArgs);
+//        System.out.println(jscompArgs);
 
         // Build a new compiler for this run, but share the cached js ASTs
         Compiler jsCompiler = new Compiler(System.err);
