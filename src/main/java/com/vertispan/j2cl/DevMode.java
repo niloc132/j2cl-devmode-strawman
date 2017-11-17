@@ -8,9 +8,12 @@ import com.google.j2cl.generator.NativeJavaScriptFile;
 import com.google.j2cl.tools.gwtincompatible.JavaPreprocessor;
 import com.google.j2cl.transpiler.J2clTranspiler;
 import com.google.j2cl.transpiler.J2clTranspiler.Result;
-import com.google.javascript.jscomp.*;
+import com.google.javascript.jscomp.CommandLineRunner;
+import com.google.javascript.jscomp.CompilationLevel;
 import com.google.javascript.jscomp.Compiler;
 import com.google.javascript.jscomp.CompilerOptions.DependencyMode;
+import com.google.javascript.jscomp.PersistentInputStore;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.Option;
@@ -18,10 +21,14 @@ import org.kohsuke.args4j.Option;
 import javax.tools.*;
 import javax.tools.JavaCompiler.CompilationTask;
 import java.io.*;
+import java.nio.file.FileSystem;
 import java.nio.file.*;
 import java.nio.file.attribute.FileTime;
 import java.security.NoSuchAlgorithmException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.*;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -168,41 +175,8 @@ public class DevMode {
         baseClosureArgs.add(intermediateJsPath + "/**/*.js");//precludes default package
 
         //pre-transpile all dependency sources to our cache dir, add those cached items to closure args
-        for (File file : classpath) {
-            //TODO maybe skip certain files that have already been transpiled
-            if (file.isDirectory()) {
-                continue;//...hacky, but probably just classes dir
-            }
-
-            // run preprocessor
-            File processed = File.createTempFile("preprocessed", ".srcjar");
-            try (FileSystem out = FrontendUtils.initZipOutput(processed.getAbsolutePath(), new Problems())) {
-                ImmutableList<String> allSources = FrontendUtils.getAllSources(Collections.singletonList(file.getAbsolutePath()), new Problems());
-                if (allSources.isEmpty()) {
-                    System.out.println("no sources in file " + file);
-                    continue;
-                }
-                JavaPreprocessor.preprocessFiles(allSources, out, new Problems());
-            }
-
-            List<String> pretranspile = new ArrayList<>(baseJ2clArgs);
-            String jszipOut = options.jsZipCacheDir + "/" + file.getAbsolutePath() + ".js.zip";
-            pretranspile.addAll(Arrays.asList("-cp", options.bytecodeClasspath, "-d", jszipOut, processed.getAbsolutePath()));
-            Result result = transpile(pretranspile);
-
-            processed.delete();
-            if (result.getExitCode() == 0) {
-                baseClosureArgs.add("--jszip");
-                baseClosureArgs.add(jszipOut);
-
-                persistentInputStore.addInput(jszipOut, "0");
-            } //ignoring failure for now, TODO don't!
-            else {
-                System.out.println("Failed compiling " + file);
-            }
-        }
-
-
+        List<String> transpiledDependencies = handleDependencies(options, classpath, baseJ2clArgs, persistentInputStore);
+        baseClosureArgs.addAll(transpiledDependencies);
 
 
         FileTime lastModified = FileTime.fromMillis(0);
@@ -320,6 +294,67 @@ public class DevMode {
             System.out.println("j2cl: " + j2clTime + "millis");
             System.out.println("jscomp: " + jscompTime + "millis");
             lastModified = nextModifiedIfSuccessful;
+        }
+    }
+
+    private static List<String> handleDependencies(Options options, List<File> classpath, List<String> baseJ2clArgs, PersistentInputStore persistentInputStore) throws IOException, InterruptedException, ExecutionException {
+        List<String> additionalClosureArgs = new ArrayList<>();
+        for (File file : classpath) {
+            //TODO maybe skip certain files that have already been transpiled
+            if (file.isDirectory()) {
+                continue;//...hacky, but probably just classes dir
+            }
+
+            // hash the file, see if we already have one
+            String hash = hash(file);
+            String jszipOut = options.jsZipCacheDir + "/" + hash + "-" + file.getName() + ".js.zip";
+            File jszipOutFile = new File(jszipOut);
+            if (jszipOutFile.exists()) {
+                additionalClosureArgs.add("--jszip");
+                additionalClosureArgs.add(jszipOut);
+
+                persistentInputStore.addInput(jszipOut, "0");
+                continue;//already exists, we'll use it
+            }
+
+            // run preprocessor
+            File processed = File.createTempFile("preprocessed", ".srcjar");
+            try (FileSystem out = FrontendUtils.initZipOutput(processed.getAbsolutePath(), new Problems())) {
+                ImmutableList<String> allSources = FrontendUtils.getAllSources(Collections.singletonList(file.getAbsolutePath()), new Problems());
+                if (allSources.isEmpty()) {
+                    System.out.println("no sources in file " + file);
+                    continue;
+                }
+                JavaPreprocessor.preprocessFiles(allSources, out, new Problems());
+            }
+
+            List<String> pretranspile = new ArrayList<>(baseJ2clArgs);
+            pretranspile.addAll(Arrays.asList("-cp", options.bytecodeClasspath, "-d", jszipOut, processed.getAbsolutePath()));
+            Result result = transpile(pretranspile);
+
+            processed.delete();
+            if (result.getExitCode() == 0) {
+                additionalClosureArgs.add("--jszip");
+                additionalClosureArgs.add(jszipOut);
+
+                persistentInputStore.addInput(jszipOut, "0");
+            } else {
+                jszipOutFile.delete();
+                // ignoring failure for now, TODO don't!
+                // This is actually slightly tricky - we can't cache failure, since the user might stop and fix the classpath
+                // and then the next build will work, but on the other hand we don't want to fail building jsinterop-base
+                // over and over again either.
+                System.out.println("Failed compiling " + file);
+            }
+        }
+        return additionalClosureArgs;
+    }
+
+    private static String hash(File file) {
+        try (FileInputStream stream = new FileInputStream(file)) {
+            return DigestUtils.md5Hex(stream);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 
