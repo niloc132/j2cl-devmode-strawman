@@ -1,20 +1,18 @@
+Do not use this to build/deploy j2cl any more - instead, in my fork's `master` branch, first cd into `maven/`, then
+run `build.sh`, then `mvn install`. That will stick the jre, bootstrap, and all the dependencies needed for the
+preprocessor and transpiler.
+
 Rough attempt at some build tools:
 
  * build.sh - production compile strawman, showing a process that could be used on each dependency to prepare its transpiled
-JS, and collect them all and build into a final optimized result
- * devmode.sh - "dev mode" strawman - loops, while "watching" for changes in source java files, resulting in intermediate
-JS, and finally minimally compiled JS to load in the browser.
- * bootstrap.sh - package up the various vmbootstrap, nativebootstrap, and closure-library guts required in a j2cl app.
- * DevMode.main() - Faster/smarter strawman for dev mode. Adds the ability to correctly zip .native.js. Keeps the JVM hot
- between builds, dramatically improving the performance of J2CL (but not jscomp. work in progress there.)
+JS, and collect them all and build into a final optimized result. Currently only needed to build jsinterop-base's jzip.
+ * DevMode.main() - Java strawman for dev mode. Keeps the JVM hot between builds, dramatically improving the performance
+ of J2CL versus running it from the command line, and leverages a PersistentInputStore for jscomp to avoid re-reading
+ all JS from disk each time. It supports a jszip cache directory to precompile source jars to JS, and will soon have a
+ matching bytecode cache as well.
 
 The first two scripts assume that everyone loves maven, and that you plan to build the
 https://github.com/vertispan/connected/tree/no-gwt-user project, with just part of elemental2, and no other dependencies
-
-The DevMode class is more configurable, supporting a classpath for java compilation, and another for jszips, so you can pass
-in any list of jars and jszips you wish. Multiple source directories can be specified, a classes directory to store java
-bytecode in, a directory to push compiled output to, and the name of the entrypoint class (which is assumed to have a
-working .native.js to actually launch it, or the html page will have to launch it).
 
 Prerequisites:
  * Project that can be compiled in J2CL
@@ -41,11 +39,14 @@ Steps:
  * unpack all .js.zip that are provided (may be as little as jre.js.zip and bootstrap.js.zip)
  * precompile all source jar dependencies (possibly checking a cache and skipping some if up to date)
    * this includes preprocessing, since the preprocessor is tied to the compiler and may change
-   * this also required de-duping "self-supersourced" classes, as j2cl doesn't allow dups
- * unpack all upstream .js.zips to a single dir in order of java classpath (allowing some types to override others)
- * (if incremental, or if we don't assume already javac'd for apt) javac all current sources
+   * javac those sources, so we have bytecode to speed up later j2cl calls
+   * this also required de-duping "self-supersourced" js classes, as j2cl doesn't allow dups
+ * unpack all upstream .js.zips to a single dir in order of java classpath (in order to allow "classpath hiding")
  * discover, skip any types which are "self-supersourced" within the project
- * transpile all current sources and current generated sources to the same dir as dependency output
+ * preprocess current sources
+ * (if incremental, or if we don't assume already javac'd for apt) javac current sources
+ * preprocess any generated sources
+ * transpile current sources and current generated sources to the same dir as dependency output
  * (missing) resolve properties, permutations
  * Run closure on all generated js, including entrypoint and defines
  * (missing) link permutations

@@ -24,7 +24,6 @@ import java.io.*;
 import java.nio.file.FileSystem;
 import java.nio.file.*;
 import java.nio.file.attribute.FileTime;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -51,7 +50,7 @@ import static com.google.common.io.Files.createTempDir;
  *     think I got it right to pick up generated classes changes too...
  *
  * Not so good:
- *   o J2CL seems deliberately difficult to integrate (no public, uses threadlocals)
+ *   o J2CL seems difficult to integrate (no public, uses threadlocals)
  *   o Not correctly recompiling classes that require it based on dependencies
  *   o Not at all convinced my javac wiring is correct
  *   o Polling for changes
@@ -60,23 +59,37 @@ public class DevMode {
     public static class Options {
         @Option(name = "-src", usage = "specify one or more java source directories", required = true)
         List<String> sourceDir = new ArrayList<>();
-        @Option(name = "-classpath", usage = "specify java classpath", required = true)
+        @Option(name = "-classpath", usage = "java classpath. bytecode jars are assumed to be pre-" +
+                "processed, source jars will be preprocessed, transpiled, and cached. This is only " +
+                "done on startup, sources that should be monitored for changes should be passed in " +
+                "via -src", required = true)
         String bytecodeClasspath;
 
-        @Option(name = "-jsClasspath", usage = "specify js archive classpath that won't be transpiled from sources or classpath. If nothing else, should include bootstrap.js.zip", required = true)
+        @Option(name = "-jsClasspath", usage = "specify js archive classpath that won't be " +
+                "transpiled from sources or classpath. If nothing else, should include " +
+                "bootstrap.js.zip and jre.js.zip", required = true)
         String j2clClasspath;
 
-        @Option(name = "-out", usage = "indicates where to write generated JS sources, sourcemaps, etc. Should be a directory specific to gwt, anything may be overwritten there.", required = true)
+        @Option(name = "-out", usage = "indicates where to write generated JS sources, sourcemaps, " +
+                "etc. Should be a directory specific to gwt, anything may be overwritten there, " +
+                "but probably should be somewhere your server will pass to the browser", required = true)
         String outputJsPathDir;
 
-        @Option(name = "-classes", usage = "provide a directory to put compiled bytecode in. if not specified, a tmp dir will be used", required = false)
+        @Option(name = "-classes", usage = "provide a directory to put compiled bytecode in. " +
+                "If not specified, a tmp dir will be used. Do not share this directory with " +
+                "your IDE or other build tools, unless they also pre-process j2cl sources")
         String classesDir;
 
-        @Option(name = "-entrypoint", usage = "The entrypoint class", required = true)
+        @Option(name = "-entrypoint", usage = "one or more entrypoints to start the app with, from" +
+                "either java or js", required = true)
         List<String> entrypoint = new ArrayList<>();
 
-        @Option(name = "-jsZipCache", usage = "directory to cache generated jszips in. Should be cleared when j2cl version changes")
+        @Option(name = "-jsZipCache", usage = "directory to cache generated jszips in. Should be " +
+                "cleared when j2cl version changes", required = true)
         String jsZipCacheDir;
+
+//        @Option(name = "-bytecodeCache", usage = "directory to cache j2cl preprocessed jars in.", required = true)
+//        String javaBytecodeCacheDir;
 
         //lifted straight from closure for consistency
         @Option(name = "--define",
@@ -88,13 +101,38 @@ public class DevMode {
                         + "the variable is marked true")
         private List<String> define = new ArrayList<>();
 
+
+        private String getIntermediateJsPath() {
+            return createDir(outputJsPathDir + "/sources").getPath();
+        }
+
+        private File getClassesDir() {
+            File classesDirFile;
+            if (classesDir != null) {
+                classesDirFile = createDir(classesDir);
+            } else {
+                classesDirFile = createTempDir();
+                classesDir = classesDirFile.getAbsolutePath();
+            }
+            return classesDirFile;
+        }
+
+        private static File createDir(String path) {
+            File f = new File(path);
+            if (f.exists()) {
+                Preconditions.checkState(f.isDirectory(), "path already exists but is not a directory " + path);
+            } else if (!f.mkdirs()) {
+                throw new IllegalStateException("Failed to create directory " + path);
+            }
+            return f;
+        }
     }
 
     private static PathMatcher javaMatcher = FileSystems.getDefault().getPathMatcher("glob:**/*.java");
     private static PathMatcher nativeJsMatcher = FileSystems.getDefault().getPathMatcher("glob:**/*.native.js");
     private static PathMatcher jsMatcher = FileSystems.getDefault().getPathMatcher("glob:**/*.js");
 
-    public static void main(String[] args) throws IOException, InterruptedException, ExecutionException, NoSuchAlgorithmException {
+    public static void main(String[] args) throws IOException, InterruptedException, ExecutionException {
 
         Options options = new Options();
         CmdLineParser parser = new CmdLineParser(options);
@@ -106,13 +144,14 @@ public class DevMode {
             System.exit(1);
         }
 
-        String intermediateJsPath = createDir(options.outputJsPathDir + "/sources").getPath();
+        String intermediateJsPath = options.getIntermediateJsPath();
         System.out.println("intermediate js from j2cl path " + intermediateJsPath);
         File generatedClassesPath = createTempDir();//TODO allow this to be configurable
-//        System.out.println("generated classes path " + generatedClassesPath);
+        System.out.println("generated classes path " + generatedClassesPath);
         String sourcesNativeZipPath = File.createTempFile("proj-native", ".zip").getAbsolutePath();
 
-        options.bytecodeClasspath += ":" + options.classesDir;
+        File classesDirFile = options.getClassesDir();
+        options.bytecodeClasspath += ":" + classesDirFile.getAbsolutePath();
         List<File> classpath = new ArrayList<>();
         for (String path : options.bytecodeClasspath.split(File.pathSeparator)) {
 //            System.out.println(path);
@@ -125,12 +164,6 @@ public class DevMode {
         fileManager.setLocation(StandardLocation.SOURCE_PATH, Collections.emptyList());
         fileManager.setLocation(StandardLocation.SOURCE_OUTPUT, Collections.singleton(generatedClassesPath));
         fileManager.setLocation(StandardLocation.CLASS_PATH, classpath);
-        File classesDirFile;
-        if (options.classesDir != null) {
-            classesDirFile = createDir(options.classesDir);
-        } else {
-            classesDirFile = createTempDir();
-        }
         fileManager.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singleton(classesDirFile));
 
         // put all j2clClasspath items into a list, we'll copy each time and add generated js
@@ -300,6 +333,9 @@ public class DevMode {
     private static List<String> handleDependencies(Options options, List<File> classpath, List<String> baseJ2clArgs, PersistentInputStore persistentInputStore) throws IOException, InterruptedException, ExecutionException {
         List<String> additionalClosureArgs = new ArrayList<>();
         for (File file : classpath) {
+            if (!file.exists()) {
+                throw new IllegalStateException(file + " does not exist!");
+            }
             //TODO maybe skip certain files that have already been transpiled
             if (file.isDirectory()) {
                 continue;//...hacky, but probably just classes dir
@@ -344,7 +380,7 @@ public class DevMode {
                 // This is actually slightly tricky - we can't cache failure, since the user might stop and fix the classpath
                 // and then the next build will work, but on the other hand we don't want to fail building jsinterop-base
                 // over and over again either.
-                System.out.println("Failed compiling " + file);
+                System.out.println("Failed compiling " + file + " to " + jszipOutFile.getName() + ", optionally copy a manual version to the cache to avoid this error");
             }
         }
         return additionalClosureArgs;
@@ -374,16 +410,6 @@ public class DevMode {
         transpileResult.getProblems().report(System.err);
         executorService.shutdownNow();//technically the finalizer will call shutdown, but we can cleanup now
         return transpileResult;
-    }
-
-    private static File createDir(String path) {
-        File f = new File(path);
-        if (f.exists()) {
-            Preconditions.checkState(f.isDirectory(), "path already exists but is not a directory " + path);
-        } else if (!f.mkdirs()) {
-            throw new IllegalStateException("Failed to create directory " + path);
-        }
-        return f;
     }
 
     private static boolean shouldZip(Path path, List<String> modifiedJavaFiles) {
