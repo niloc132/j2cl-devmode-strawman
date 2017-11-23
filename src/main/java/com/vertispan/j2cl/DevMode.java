@@ -364,6 +364,8 @@ public class DevMode {
                 JavaPreprocessor.preprocessFiles(allSources, out, new Problems());
             }
 
+            //TODO javac these first, so we have consistent bytecode, and use that to rebuild the classpath
+
             List<String> pretranspile = new ArrayList<>(baseJ2clArgs);
             pretranspile.addAll(Arrays.asList("-cp", options.bytecodeClasspath, "-d", jszipOut, processed.getAbsolutePath()));
             Result result = transpile(pretranspile);

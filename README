@@ -30,6 +30,7 @@ Build process, and assumptions:
 Assuming:
  * No globally consistent version of j2cl (requires local cache clearing as needed)
    * No or partially distributed `.j2.zip`s (would require versioning by j2cl, re-releasing by entire ecosystem for any incremental release)
+ * In constrast, preprocessor is _not_ expected to change (though the steps below don't currently leverage this)
  * Closure will continue to error on duplicate declared modules
  * External (not in jre.jar) "supersource" still matters (i.e. gwt will not accept any arbitrary emulation)
  * Dependencies which supersource themselves still are permitted to be used

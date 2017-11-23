@@ -31,7 +31,6 @@
       <version>0.1-SNAPSHOT</version>
     </dependency>
     <dependency>
-      <!-- snapshot lag has recovered, removing this for now -->
       <groupId>com.vertispan.javascript</groupId>
       <!--<groupId>com.google.javascript</groupId>-->
       <artifactId>closure-compiler-unshaded</artifactId>
