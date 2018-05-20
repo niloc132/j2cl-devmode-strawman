@@ -103,6 +103,20 @@ public class DevMode {
                         + "the variable is marked true")
         private List<String> define = new ArrayList<>();
 
+        //lifted straight from closure for consistency
+        @Option(name = "--externs",
+                usage = "The file containing JavaScript externs. You may specify"
+                        + " multiple")
+        private List<String> externs = new ArrayList<>();
+
+
+        @Option(name = "-declarelegacynamespaces",
+                usage =
+                        "Enable goog.module.declareLegacyNamespace() for generated goog.module().",
+                hidden = true
+        )
+        protected boolean declareLegacyNamespaces = false;
+
 
         private String getIntermediateJsPath() {
             return createDir(outputJsPathDir + "/sources").getPath();
@@ -149,10 +163,11 @@ public class DevMode {
         String intermediateJsPath = options.getIntermediateJsPath();
         System.out.println("intermediate js from j2cl path " + intermediateJsPath);
         File generatedClassesPath = createTempDir();//TODO allow this to be configurable
-        System.out.println("generated classes path " + generatedClassesPath);
+        System.out.println("generated source path " + generatedClassesPath);
         String sourcesNativeZipPath = File.createTempFile("proj-native", ".zip").getAbsolutePath();
 
         File classesDirFile = options.getClassesDir();
+        System.out.println("output class directory " + classesDirFile);
         options.bytecodeClasspath += ":" + classesDirFile.getAbsolutePath();
         List<File> classpath = new ArrayList<>();
         for (String path : options.bytecodeClasspath.split(File.pathSeparator)) {
@@ -169,7 +184,10 @@ public class DevMode {
         fileManager.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singleton(classesDirFile));
 
         // put all j2clClasspath items into a list, we'll copy each time and add generated js
-        List<String> baseJ2clArgs = Arrays.asList("-cp", options.bytecodeClasspath, "-d", intermediateJsPath);
+        List<String> baseJ2clArgs = new ArrayList<>(Arrays.asList("-cp", options.bytecodeClasspath, "-d", intermediateJsPath));
+        if (options.declareLegacyNamespaces) {
+            baseJ2clArgs.add("-declarelegacynamespaces");
+        }
 
         String intermediateJsOutput = options.outputJsPathDir + "/app.js";
         CompilationLevel compilationLevel = CompilationLevel.BUNDLE;
@@ -191,6 +209,10 @@ public class DevMode {
         for (String entrypoint : options.entrypoint) {
             baseClosureArgs.add("--entry_point");
             baseClosureArgs.add(entrypoint);
+        }
+        for (String extern : options.externs) {
+            baseClosureArgs.add("--externs");
+            baseClosureArgs.add(extern);
         }
 
         // configure a persistent input store - we'll reuse this and not the compiler for now, to cache the ASTs,
