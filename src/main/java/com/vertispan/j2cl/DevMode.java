@@ -4,6 +4,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.j2cl.common.Problems;
 import com.google.j2cl.frontend.FrontendUtils;
+import com.google.j2cl.frontend.FrontendUtils.FileInfo;
 import com.google.j2cl.generator.NativeJavaScriptFile;
 import com.google.j2cl.tools.gwtincompatible.JavaPreprocessor;
 import com.google.j2cl.transpiler.J2clTranspiler;
@@ -29,6 +30,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -219,7 +221,7 @@ public class DevMode {
             // currently polling for changes.
             // block until changes instead? easy to replace with filewatcher, just watch out for java9/osx issues...
 
-            List<String> modifiedJavaFiles = new ArrayList<>();
+            List<FileInfo> modifiedJavaFiles = new ArrayList<>();
             FileTime newerThan = lastModified;
             long pollStarted = System.currentTimeMillis();
 
@@ -234,7 +236,7 @@ public class DevMode {
                                     && fileAttr.lastModifiedTime().compareTo(newerThan) > 0
                                     && javaMatcher.matches(filePath);
                         })
-                        .forEach(file -> modifiedJavaFiles.add(file.toString()));
+                        .forEach(file -> modifiedJavaFiles.add(FileInfo.create(file.toString(), file.toString())));
             }
             long pollTime = System.currentTimeMillis() - pollStarted;
             // don't replace this until the loop finishes successfully, so we know the last time we started a successful compile
@@ -266,7 +268,7 @@ public class DevMode {
 //            modifiedJavaFiles.forEach(System.out::println);
 
             // compile java files with javac into classesDir
-            Iterable<? extends JavaFileObject> modifiedFileObjects = fileManager.getJavaFileObjectsFromStrings(modifiedJavaFiles);
+            Iterable<? extends JavaFileObject> modifiedFileObjects = fileManager.getJavaFileObjectsFromStrings(modifiedJavaFiles.stream().map(FileInfo::sourcePath).collect(Collectors.toList()));
             //TODO pass-non null for "classes" to properly kick apt?
             //TODO consider a different classpath for this tasks, so as to not interfere with everything else?
 
@@ -287,7 +289,7 @@ public class DevMode {
                             !fileAttr.isDirectory()
                             && javaMatcher.matches(filePath)
                             /*TODO check modified?*/
-                    ).forEach(file -> modifiedJavaFiles.add(file.toString()));
+                    ).forEach(file -> modifiedJavaFiles.add(FileInfo.create(file.toString(), file.toString())));
 
             // run preprocessor on changed files
             File processed = File.createTempFile("preprocessed", ".srcjar");
@@ -356,7 +358,7 @@ public class DevMode {
             // run preprocessor
             File processed = File.createTempFile("preprocessed", ".srcjar");
             try (FileSystem out = FrontendUtils.initZipOutput(processed.getAbsolutePath(), new Problems())) {
-                ImmutableList<String> allSources = FrontendUtils.getAllSources(Collections.singletonList(file.getAbsolutePath()), new Problems());
+                ImmutableList<FileInfo> allSources = FrontendUtils.getAllSources(Collections.singletonList(file.getAbsolutePath()), new Problems());
                 if (allSources.isEmpty()) {
                     System.out.println("no sources in file " + file);
                     continue;
@@ -367,7 +369,7 @@ public class DevMode {
             //TODO javac these first, so we have consistent bytecode, and use that to rebuild the classpath
 
             List<String> pretranspile = new ArrayList<>(baseJ2clArgs);
-            pretranspile.addAll(Arrays.asList("-cp", options.bytecodeClasspath, "-d", jszipOut, processed.getAbsolutePath()));
+            pretranspile.addAll(Arrays.asList("-cp", options.bytecodeClasspath, "-d", jszipOut, "-nativesourcepath", file.getAbsolutePath(), processed.getAbsolutePath()));
             Result result = transpile(pretranspile);
 
             processed.delete();
@@ -414,8 +416,8 @@ public class DevMode {
         return transpileResult;
     }
 
-    private static boolean shouldZip(Path path, List<String> modifiedJavaFiles) {
-        return nativeJsMatcher.matches(path) && matchesChangedJavaFile(path, modifiedJavaFiles);
+    private static boolean shouldZip(Path path, List<FileInfo> modifiedJavaFiles) {
+        return nativeJsMatcher.matches(path);// && matchesChangedJavaFile(path, modifiedJavaFiles);
     }
 
     private static boolean matchesChangedJavaFile(Path path, List<String> modifiedJavaFiles) {
