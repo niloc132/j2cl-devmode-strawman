@@ -22,6 +22,7 @@ import org.kohsuke.args4j.Option;
 import javax.tools.*;
 import javax.tools.JavaCompiler.CompilationTask;
 import java.io.*;
+import java.net.URI;
 import java.nio.file.FileSystem;
 import java.nio.file.*;
 import java.nio.file.attribute.FileTime;
@@ -32,6 +33,7 @@ import java.util.List;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
 
 import static com.google.common.io.Files.createTempDir;
@@ -285,6 +287,19 @@ public class DevMode {
                 }
             }
 
+            // blindly copy any JS in sources that aren't a native.js
+            // TODO be less "blind" about this, only copy changed files?
+            for (String dir : options.sourceDir) {
+                Files.find(Paths.get(dir), Integer.MAX_VALUE, (path, attrs) -> jsMatcher.matches(path) && !nativeJsMatcher.matches(path))
+                        .forEach(path -> {
+                            try {
+                                Files.copy(path, Paths.get(Paths.get(dir).toAbsolutePath().relativize(path.toAbsolutePath()).toString()));
+                            } catch (IOException e) {
+                                throw new RuntimeException("failed to copy plain js", e);
+                            }
+                        });
+            }
+
             System.out.println(modifiedJavaFiles.size() + " updated java files");
 //            modifiedJavaFiles.forEach(System.out::println);
 
@@ -393,8 +408,23 @@ public class DevMode {
             pretranspile.addAll(Arrays.asList("-cp", options.bytecodeClasspath, "-d", jszipOut, "-nativesourcepath", file.getAbsolutePath(), processed.getAbsolutePath()));
             Result result = transpile(pretranspile);
 
+            // blindly copy any JS in sources that aren't a native.js
+            ZipFile zipInputFile = new ZipFile(file);
+
             processed.delete();
             if (result.getExitCode() == 0) {
+                try (FileSystem fs = FileSystems.newFileSystem(URI.create("jar:" + file.toURI()), Collections.singletonMap("create", "true"))) {
+
+                    for (ZipEntry entry : Collections.list(zipInputFile.entries())) {
+                        Path entryPath = Paths.get(entry.getName());
+                        if (jsMatcher.matches(entryPath) && !nativeJsMatcher.matches(entryPath)) {
+                            try (InputStream inputStream = zipInputFile.getInputStream(entry)) {
+                                Files.copy(inputStream, fs.getPath(entry.getName()));
+                            }
+                        }
+                    }
+                }
+
                 additionalClosureArgs.add("--jszip");
                 additionalClosureArgs.add(jszipOut);
 
