@@ -171,7 +171,6 @@ public class DevMode {
         options.bytecodeClasspath += ":" + classesDirFile.getAbsolutePath();
         List<File> classpath = new ArrayList<>();
         for (String path : options.bytecodeClasspath.split(File.pathSeparator)) {
-//            System.out.println(path);
             classpath.add(new File(path));
         }
 
@@ -420,13 +419,15 @@ public class DevMode {
         }
     }
 
+    /**
+     * Transpiles Java to Js. Should have the same effect as running the main directly, except by running
+     * it here we don't System.exit at the end, so the JVM can stay hot.
+     */
     private static Result transpile(List<String> j2clArgs) throws InterruptedException, ExecutionException {
-        //recompile java->js
-//            System.out.println(j2clArgs);
+        // Sadly, can't do this, each run of the transpiler MUST be in its own thread, since it leaves dirty threadlocals
+        // Result transpileResult = transpiler.transpile(j2clArgs.toArray(new String[0]));
 
-        // Sadly, can't do this, each run of the transpiler MUST be in its own thread, since it
-        // can't seem to clean up its threadlocals.
-//            Result transpileResult = transpiler.transpile(j2clArgs.toArray(new String[0]));
+        // Instead, we make a new thread, and block until the work is complete, then try to clean up
         ExecutorService executorService = Executors.newSingleThreadExecutor();
         Future<Result> futureResult = executorService.submit(() -> {
             J2clTranspiler transpiler = new J2clTranspiler();
@@ -451,7 +452,6 @@ public class DevMode {
     private static boolean jscomp(List<String> baseClosureArgs, PersistentInputStore persistentInputStore, String updatedJsDirectories) throws IOException {
         // collect all js into one artifact (currently jscomp, but it would be wonderful to not pay quite so much for this...)
         List<String> jscompArgs = new ArrayList<>(baseClosureArgs);
-//        System.out.println(jscompArgs);
 
         // Build a new compiler for this run, but share the cached js ASTs
         Compiler jsCompiler = new Compiler(System.err);
