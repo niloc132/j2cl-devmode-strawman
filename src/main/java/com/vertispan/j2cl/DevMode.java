@@ -8,7 +8,6 @@ import com.google.j2cl.frontend.FrontendUtils.FileInfo;
 import com.google.j2cl.generator.NativeJavaScriptFile;
 import com.google.j2cl.tools.gwtincompatible.JavaPreprocessor;
 import com.google.j2cl.transpiler.J2clTranspiler;
-import com.google.j2cl.transpiler.J2clTranspiler.Result;
 import com.google.javascript.jscomp.CommandLineRunner;
 import com.google.javascript.jscomp.CompilationLevel;
 import com.google.javascript.jscomp.Compiler;
@@ -341,12 +340,11 @@ public class DevMode {
             j2clArgs.add(processed.getAbsolutePath());
 
             long j2clStarted = System.currentTimeMillis();
-            Result transpileResult = transpile(j2clArgs);
-//            System.out.println(j2clArgs);
+            Problems transpileResult = transpile(j2clArgs);
 
             processed.delete();
 
-            if (transpileResult.getExitCode() != 0) {
+            if (transpileResult.reportAndGetExitCode(System.err) != 0) {
                 //print problems
                 continue;
             }
@@ -406,13 +404,13 @@ public class DevMode {
 
             List<String> pretranspile = new ArrayList<>(baseJ2clArgs);
             pretranspile.addAll(Arrays.asList("-cp", options.bytecodeClasspath, "-d", jszipOut, "-nativesourcepath", file.getAbsolutePath(), processed.getAbsolutePath()));
-            Result result = transpile(pretranspile);
+            Problems result = transpile(pretranspile);
 
             // blindly copy any JS in sources that aren't a native.js
             ZipFile zipInputFile = new ZipFile(file);
 
             processed.delete();
-            if (result.getExitCode() == 0) {
+            if (result.reportAndGetExitCode(System.err) == 0) {
                 try (FileSystem fs = FileSystems.newFileSystem(URI.create("jar:" + jszipOutFile.toURI()), Collections.singletonMap("create", "true"))) {
                     for (ZipEntry entry : Collections.list(zipInputFile.entries())) {
                         Path entryPath = Paths.get(entry.getName());
@@ -454,20 +452,8 @@ public class DevMode {
      * Transpiles Java to Js. Should have the same effect as running the main directly, except by running
      * it here we don't System.exit at the end, so the JVM can stay hot.
      */
-    private static Result transpile(List<String> j2clArgs) throws InterruptedException, ExecutionException {
-        // Sadly, can't do this, each run of the transpiler MUST be in its own thread, since it leaves dirty threadlocals
-        // Result transpileResult = transpiler.transpile(j2clArgs.toArray(new String[0]));
-
-        // Instead, we make a new thread, and block until the work is complete, then try to clean up
-        ExecutorService executorService = Executors.newSingleThreadExecutor();
-        Future<Result> futureResult = executorService.submit(() -> {
-            J2clTranspiler transpiler = new J2clTranspiler();
-            return transpiler.transpile(j2clArgs.toArray(new String[0]));
-        });
-        Result transpileResult = futureResult.get();
-        transpileResult.getProblems().report(System.err);
-        executorService.shutdownNow();//technically the finalizer will call shutdown, but we can cleanup now
-        return transpileResult;
+    private static Problems transpile(List<String> j2clArgs) {
+        return J2clTranspiler.transpile(j2clArgs.toArray(new String[0]));
     }
 
     private static boolean shouldZip(Path path, List<FileInfo> modifiedJavaFiles) {
