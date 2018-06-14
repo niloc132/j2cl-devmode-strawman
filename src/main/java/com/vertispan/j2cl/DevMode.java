@@ -413,13 +413,14 @@ public class DevMode {
 
             processed.delete();
             if (result.getExitCode() == 0) {
-                try (FileSystem fs = FileSystems.newFileSystem(URI.create("jar:" + file.toURI()), Collections.singletonMap("create", "true"))) {
-
+                try (FileSystem fs = FileSystems.newFileSystem(URI.create("jar:" + jszipOutFile.toURI()), Collections.singletonMap("create", "true"))) {
                     for (ZipEntry entry : Collections.list(zipInputFile.entries())) {
                         Path entryPath = Paths.get(entry.getName());
                         if (jsMatcher.matches(entryPath) && !nativeJsMatcher.matches(entryPath)) {
                             try (InputStream inputStream = zipInputFile.getInputStream(entry)) {
-                                Files.copy(inputStream, fs.getPath(entry.getName()));
+                                Path path = fs.getPath(entry.getName()).toAbsolutePath();
+                                // using StandardCopyOption.REPLACE_EXISTING seems overly pessimistic, but i can't get it to work without it
+                                Files.copy(inputStream, path, StandardCopyOption.REPLACE_EXISTING);
                             }
                         }
                     }
