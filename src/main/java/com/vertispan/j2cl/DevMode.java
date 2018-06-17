@@ -392,7 +392,7 @@ public class DevMode {
             // run preprocessor
             File processed = File.createTempFile("preprocessed", ".srcjar");
             try (FileSystem out = FrontendUtils.initZipOutput(processed.getAbsolutePath(), new Problems())) {
-                ImmutableList<FileInfo> allSources = FrontendUtils.getAllSources(Collections.singletonList(file.getAbsolutePath()), new Problems());
+                ImmutableList<FileInfo> allSources = FrontendUtils.getAllSources(Collections.singletonList(file.getAbsolutePath()), new Problems()).collect(ImmutableList.toImmutableList());
                 if (allSources.isEmpty()) {
                     System.out.println("no sources in file " + file);
                     continue;
