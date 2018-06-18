@@ -8,11 +8,9 @@ import com.google.j2cl.frontend.FrontendUtils.FileInfo;
 import com.google.j2cl.generator.NativeJavaScriptFile;
 import com.google.j2cl.tools.gwtincompatible.JavaPreprocessor;
 import com.google.j2cl.transpiler.J2clTranspiler;
-import com.google.javascript.jscomp.CommandLineRunner;
-import com.google.javascript.jscomp.CompilationLevel;
+import com.google.javascript.jscomp.*;
 import com.google.javascript.jscomp.Compiler;
 import com.google.javascript.jscomp.CompilerOptions.DependencyMode;
-import com.google.javascript.jscomp.PersistentInputStore;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
@@ -83,8 +81,8 @@ public class DevMode {
                 "your IDE or other build tools, unless they also pre-process j2cl sources")
         String classesDir;
 
-        @Option(name = "-entrypoint", usage = "one or more entrypoints to start the app with, from" +
-                "either java or js", required = true)
+        @Option(name = "-entrypoint", aliases = "--entry_point",
+                usage = "one or more entrypoints to start the app with, from either java or js", required = true)
         List<String> entrypoint = new ArrayList<>();
 
         @Option(name = "-jsZipCache", usage = "directory to cache generated jszips in. Should be " +
@@ -110,7 +108,49 @@ public class DevMode {
                         + " multiple")
         private List<String> externs = new ArrayList<>();
 
+        //lifted straight from closure for consistency
+        @Option(
+                name = "--compilation_level",
+                aliases = {"-O"},
+                usage =
+                        "Specifies the compilation level to use. Options: "
+                                + "BUNDLE, "
+                                + "WHITESPACE_ONLY, "
+                                + "SIMPLE (default), "
+                                + "ADVANCED"
+        )
+        private String compilationLevel = "BUNDLE";
 
+        //lifted straight from closure for consistency
+        @Option(
+                name = "--language_out",
+                usage =
+                        "Sets the language spec to which output should conform. "
+                                + "Options: ECMASCRIPT3, ECMASCRIPT5, ECMASCRIPT5_STRICT, "
+                                + "ECMASCRIPT6_TYPED (experimental), ECMASCRIPT_2015, ECMASCRIPT_2016, "
+                                + "ECMASCRIPT_2017, ECMASCRIPT_NEXT, NO_TRANSPILE"
+        )
+        private String languageOut = "ECMASCRIPT5";
+
+        //lifted straight from closure for consistency (this should get a rewrite to clarify that for gwt-like
+        // behavior, NONE should be avoided. Default changed to strict.
+        @Option(
+                name = "--dependency_mode",
+                usage = "Specifies how the compiler should determine the set and order "
+                        + "of files for a compilation. Options: NONE the compiler will include "
+                        + "all src files in the order listed, STRICT files will be included and "
+                        + "sorted by starting from namespaces or files listed by the "
+                        + "--entry_point flag - files will only be included if they are "
+                        + "referenced by a goog.require or CommonJS require or ES6 import, LOOSE "
+                        + "same as with STRICT but files which do not goog.provide a namespace "
+                        + "and are not modules will be automatically added as "
+                        + "--entry_point entries. "//Defaults to NONE."
+        )
+        private CompilerOptions.DependencyMode dependencyMode = CompilerOptions.DependencyMode.STRICT;
+
+
+
+        // j2cl-specific flag
         @Option(name = "-declarelegacynamespaces",
                 usage =
                         "Enable goog.module.declareLegacyNamespace() for generated goog.module().",
@@ -190,11 +230,12 @@ public class DevMode {
         }
 
         String intermediateJsOutput = options.outputJsPathDir + "/app.js";
-        CompilationLevel compilationLevel = CompilationLevel.BUNDLE;
+        CompilationLevel compilationLevel = CompilationLevel.fromString(options.compilationLevel);
         List<String> baseClosureArgs = new ArrayList<>(Arrays.asList(
-                "--compilation_level", compilationLevel.name(),// fastest way to build, just smush everything together
+                "--compilation_level", compilationLevel.name(),
                 "--js_output_file", intermediateJsOutput,// temp file to write to before we insert the missing line at the top
-                "--dependency_mode", DependencyMode.STRICT.name()// force STRICT mode so that the compiler at least orders the inputs
+                "--dependency_mode", options.dependencyMode.name(),// force STRICT mode so that the compiler at least orders the inputs
+                "--language_out", options.languageOut
         ));
         if (compilationLevel == CompilationLevel.BUNDLE) {
             // support BUNDLE mode, with no remote fetching for dependencies)
