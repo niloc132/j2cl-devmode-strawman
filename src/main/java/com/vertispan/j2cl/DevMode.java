@@ -458,6 +458,7 @@ public class DevMode {
                         if (jsMatcher.matches(entryPath) && !nativeJsMatcher.matches(entryPath)) {
                             try (InputStream inputStream = zipInputFile.getInputStream(entry)) {
                                 Path path = fs.getPath(entry.getName()).toAbsolutePath();
+                                Files.createDirectories(path.getParent());
                                 // using StandardCopyOption.REPLACE_EXISTING seems overly pessimistic, but i can't get it to work without it
                                 Files.copy(inputStream, path, StandardCopyOption.REPLACE_EXISTING);
                             }
