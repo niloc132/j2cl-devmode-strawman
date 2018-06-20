@@ -240,7 +240,7 @@ public class DevMode {
         if (compilationLevel == CompilationLevel.BUNDLE) {
             // support BUNDLE mode, with no remote fetching for dependencies)
             baseClosureArgs.add("--define");
-            baseClosureArgs.add( "goog.ENABLE_DEBUG_LOADER=false");
+            baseClosureArgs.add("goog.ENABLE_DEBUG_LOADER=false");
         }
 
         for (String define : options.define) {
