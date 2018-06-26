@@ -333,7 +333,10 @@ public class DevMode {
                 Files.find(Paths.get(dir), Integer.MAX_VALUE, (path, attrs) -> jsMatcher.matches(path) && !nativeJsMatcher.matches(path))
                         .forEach(path -> {
                             try {
-                                Files.copy(path, Paths.get(Paths.get(dir).toAbsolutePath().relativize(path.toAbsolutePath()).toString()));
+                                final Path target = Paths.get( options.outputJsPathDir, Paths.get( dir ).toAbsolutePath().relativize( path.toAbsolutePath() ).toString() );
+                                Files.createDirectories( target.getParent() );
+                                // using StandardCopyOption.REPLACE_EXISTING seems overly pessimistic, but i can't get it to work without it
+                                Files.copy(path, target, StandardCopyOption.REPLACE_EXISTING);
                             } catch (IOException e) {
                                 throw new RuntimeException("failed to copy plain js", e);
                             }
