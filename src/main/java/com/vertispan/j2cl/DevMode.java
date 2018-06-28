@@ -10,11 +10,9 @@ import com.google.j2cl.tools.gwtincompatible.JavaPreprocessor;
 import com.google.j2cl.transpiler.J2clTranspiler;
 import com.google.javascript.jscomp.*;
 import com.google.javascript.jscomp.Compiler;
-import com.google.javascript.jscomp.CompilerOptions.DependencyMode;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
-import org.kohsuke.args4j.Option;
 
 import javax.tools.*;
 import javax.tools.JavaCompiler.CompilationTask;
@@ -57,133 +55,6 @@ import static com.google.common.io.Files.createTempDir;
  *   o Polling for changes
  */
 public class DevMode {
-    public static class Options {
-        @Option(name = "-src", usage = "specify one or more java source directories", required = true)
-        List<String> sourceDir = new ArrayList<>();
-        @Option(name = "-classpath", usage = "java classpath. bytecode jars are assumed to be pre-" +
-                "processed, source jars will be preprocessed, transpiled, and cached. This is only " +
-                "done on startup, sources that should be monitored for changes should be passed in " +
-                "via -src", required = true)
-        String bytecodeClasspath;
-
-        @Option(name = "-jsClasspath", usage = "specify js archive classpath that won't be " +
-                "transpiled from sources or classpath. If nothing else, should include " +
-                "bootstrap.js.zip and jre.js.zip", required = true)
-        String j2clClasspath;
-
-        @Option(name = "-out", usage = "indicates where to write generated JS sources, sourcemaps, " +
-                "etc. Should be a directory specific to gwt, anything may be overwritten there, " +
-                "but probably should be somewhere your server will pass to the browser", required = true)
-        String outputJsPathDir;
-
-        @Option(name = "-classes", usage = "provide a directory to put compiled bytecode in. " +
-                "If not specified, a tmp dir will be used. Do not share this directory with " +
-                "your IDE or other build tools, unless they also pre-process j2cl sources")
-        String classesDir;
-
-        @Option(name = "-entrypoint", aliases = "--entry_point",
-                usage = "one or more entrypoints to start the app with, from either java or js", required = true)
-        List<String> entrypoint = new ArrayList<>();
-
-        @Option(name = "-jsZipCache", usage = "directory to cache generated jszips in. Should be " +
-                "cleared when j2cl version changes", required = true)
-        String jsZipCacheDir;
-
-//        @Option(name = "-bytecodeCache", usage = "directory to cache j2cl preprocessed jars in.", required = true)
-//        String javaBytecodeCacheDir;
-
-        //lifted straight from closure for consistency
-        @Option(name = "--define",
-                aliases = {"--D", "-D"},
-                usage = "Override the value of a variable annotated @define. "
-                        + "The format is <name>[=<val>], where <name> is the name of a @define "
-                        + "variable and <val> is a boolean, number, or a single-quoted string "
-                        + "that contains no single quotes. If [=<val>] is omitted, "
-                        + "the variable is marked true")
-        private List<String> define = new ArrayList<>();
-
-        //lifted straight from closure for consistency
-        @Option(name = "--externs",
-                usage = "The file containing JavaScript externs. You may specify"
-                        + " multiple")
-        private List<String> externs = new ArrayList<>();
-
-        //lifted straight from closure for consistency
-        @Option(
-                name = "--compilation_level",
-                aliases = {"-O"},
-                usage =
-                        "Specifies the compilation level to use. Options: "
-                                + "BUNDLE, "
-                                + "WHITESPACE_ONLY, "
-                                + "SIMPLE (default), "
-                                + "ADVANCED"
-        )
-        private String compilationLevel = "BUNDLE";
-
-        //lifted straight from closure for consistency
-        @Option(
-                name = "--language_out",
-                usage =
-                        "Sets the language spec to which output should conform. "
-                                + "Options: ECMASCRIPT3, ECMASCRIPT5, ECMASCRIPT5_STRICT, "
-                                + "ECMASCRIPT6_TYPED (experimental), ECMASCRIPT_2015, ECMASCRIPT_2016, "
-                                + "ECMASCRIPT_2017, ECMASCRIPT_NEXT, NO_TRANSPILE"
-        )
-        private String languageOut = "ECMASCRIPT5";
-
-        //lifted straight from closure for consistency (this should get a rewrite to clarify that for gwt-like
-        // behavior, NONE should be avoided. Default changed to strict.
-        @Option(
-                name = "--dependency_mode",
-                usage = "Specifies how the compiler should determine the set and order "
-                        + "of files for a compilation. Options: NONE the compiler will include "
-                        + "all src files in the order listed, STRICT files will be included and "
-                        + "sorted by starting from namespaces or files listed by the "
-                        + "--entry_point flag - files will only be included if they are "
-                        + "referenced by a goog.require or CommonJS require or ES6 import, LOOSE "
-                        + "same as with STRICT but files which do not goog.provide a namespace "
-                        + "and are not modules will be automatically added as "
-                        + "--entry_point entries. "//Defaults to NONE."
-        )
-        private CompilerOptions.DependencyMode dependencyMode = CompilerOptions.DependencyMode.STRICT;
-
-
-
-        // j2cl-specific flag
-        @Option(name = "-declarelegacynamespaces",
-                usage =
-                        "Enable goog.module.declareLegacyNamespace() for generated goog.module().",
-                hidden = true
-        )
-        protected boolean declareLegacyNamespaces = false;
-
-
-        private String getIntermediateJsPath() {
-            return createDir(outputJsPathDir + "/sources").getPath();
-        }
-
-        private File getClassesDir() {
-            File classesDirFile;
-            if (classesDir != null) {
-                classesDirFile = createDir(classesDir);
-            } else {
-                classesDirFile = createTempDir();
-                classesDir = classesDirFile.getAbsolutePath();
-            }
-            return classesDirFile;
-        }
-
-        private static File createDir(String path) {
-            File f = new File(path);
-            if (f.exists()) {
-                Preconditions.checkState(f.isDirectory(), "path already exists but is not a directory " + path);
-            } else if (!f.mkdirs()) {
-                throw new IllegalStateException("Failed to create directory " + path);
-            }
-            return f;
-        }
-    }
 
     private static PathMatcher javaMatcher = FileSystems.getDefault().getPathMatcher("glob:**/*.java");
     private static PathMatcher nativeJsMatcher = FileSystems.getDefault().getPathMatcher("glob:**/*.native.js");
@@ -191,7 +62,7 @@ public class DevMode {
 
     public static void main(String[] args) throws IOException, InterruptedException, ExecutionException {
 
-        Options options = new Options();
+        Gwt3Options options = new Gwt3Options();
         CmdLineParser parser = new CmdLineParser(options);
         try {
             parser.parseArgument(args);
@@ -209,9 +80,9 @@ public class DevMode {
 
         File classesDirFile = options.getClassesDir();
         System.out.println("output class directory " + classesDirFile);
-        options.bytecodeClasspath += ":" + classesDirFile.getAbsolutePath();
+        String bytecodeClasspath = options.getBytecodeClasspath() + ":" + classesDirFile.getAbsolutePath();
         List<File> classpath = new ArrayList<>();
-        for (String path : options.bytecodeClasspath.split(File.pathSeparator)) {
+        for (String path : bytecodeClasspath.split(File.pathSeparator)) {
             classpath.add(new File(path));
         }
 
@@ -224,18 +95,18 @@ public class DevMode {
         fileManager.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singleton(classesDirFile));
 
         // put all j2clClasspath items into a list, we'll copy each time and add generated js
-        List<String> baseJ2clArgs = new ArrayList<>(Arrays.asList("-cp", options.bytecodeClasspath, "-d", intermediateJsPath));
-        if (options.declareLegacyNamespaces) {
+        List<String> baseJ2clArgs = new ArrayList<>(Arrays.asList("-cp", bytecodeClasspath, "-d", intermediateJsPath));
+        if (options.isDeclareLegacyNamespaces()) {
             baseJ2clArgs.add("-declarelegacynamespaces");
         }
 
-        String intermediateJsOutput = options.outputJsPathDir + "/app.js";
-        CompilationLevel compilationLevel = CompilationLevel.fromString(options.compilationLevel);
+        String intermediateJsOutput = options.getJsOutputFile();
+        CompilationLevel compilationLevel = CompilationLevel.fromString(options.getCompilationLevel());
         List<String> baseClosureArgs = new ArrayList<>(Arrays.asList(
                 "--compilation_level", compilationLevel.name(),
                 "--js_output_file", intermediateJsOutput,// temp file to write to before we insert the missing line at the top
-                "--dependency_mode", options.dependencyMode.name(),// force STRICT mode so that the compiler at least orders the inputs
-                "--language_out", options.languageOut
+                "--dependency_mode", options.getDependencyMode().name(),// force STRICT mode so that the compiler at least orders the inputs
+                "--language_out", options.getLanguageOut()
         ));
         if (compilationLevel == CompilationLevel.BUNDLE) {
             // support BUNDLE mode, with no remote fetching for dependencies)
@@ -243,15 +114,15 @@ public class DevMode {
             baseClosureArgs.add("goog.ENABLE_DEBUG_LOADER=false");
         }
 
-        for (String define : options.define) {
+        for (String define : options.getDefine()) {
             baseClosureArgs.add("--define");
             baseClosureArgs.add(define);
         }
-        for (String entrypoint : options.entrypoint) {
+        for (String entrypoint : options.getEntrypoint()) {
             baseClosureArgs.add("--entry_point");
             baseClosureArgs.add(entrypoint);
         }
-        for (String extern : options.externs) {
+        for (String extern : options.getExterns()) {
             baseClosureArgs.add("--externs");
             baseClosureArgs.add(extern);
         }
@@ -260,7 +131,7 @@ public class DevMode {
         // and still allow jscomp to be in modes other than BUNDLE
         PersistentInputStore persistentInputStore = new PersistentInputStore();
 
-        for (String zipPath : options.j2clClasspath.split(File.pathSeparator)) {
+        for (String zipPath : options.getJ2clClasspath().split(File.pathSeparator)) {
             Preconditions.checkArgument(new File(zipPath).exists() && new File(zipPath).isFile(), "jszip doesn't exist! %s", zipPath);
 
             baseClosureArgs.add("--jszip");
@@ -291,7 +162,7 @@ public class DevMode {
             //this isn't quite right - should check for _at least one_ newer than lastModified, and if so, recompile all
             //newer than lastSuccess
             //also, should look for .native.js too, but not collect them
-            for (String dir : options.sourceDir) {
+            for (String dir : options.getSourceDir()) {
                 Files.find(Paths.get(dir),
                         Integer.MAX_VALUE,
                         (filePath, fileAttr) -> {
@@ -313,7 +184,7 @@ public class DevMode {
             //collect native files in zip, but only if that file is also present in the changed .java sources
             boolean anyNativeJs = false;
             try (ZipOutputStream zipOutputStream = new ZipOutputStream(new FileOutputStream(sourcesNativeZipPath))) {
-                for (String dir : options.sourceDir) {
+                for (String dir : options.getSourceDir()) {
                     anyNativeJs |= Files.find(Paths.get(dir), Integer.MAX_VALUE, (path, attrs) -> shouldZip(path, modifiedJavaFiles)).reduce(false, (ignore, file) -> {
                         try {
                             zipOutputStream.putNextEntry(new ZipEntry(Paths.get(dir).toAbsolutePath().relativize(file.toAbsolutePath()).toString()));
@@ -329,7 +200,7 @@ public class DevMode {
 
             // blindly copy any JS in sources that aren't a native.js
             // TODO be less "blind" about this, only copy changed files?
-            for (String dir : options.sourceDir) {
+            for (String dir : options.getSourceDir()) {
                 Files.find(Paths.get(dir), Integer.MAX_VALUE, (path, attrs) -> jsMatcher.matches(path) && !nativeJsMatcher.matches(path))
                         .forEach(path -> {
                             try {
@@ -410,7 +281,7 @@ public class DevMode {
         }
     }
 
-    private static List<String> handleDependencies(Options options, List<File> classpath, List<String> baseJ2clArgs, PersistentInputStore persistentInputStore) throws IOException, InterruptedException, ExecutionException {
+    private static List<String> handleDependencies(Gwt3Options options, List<File> classpath, List<String> baseJ2clArgs, PersistentInputStore persistentInputStore) throws IOException, InterruptedException, ExecutionException {
         List<String> additionalClosureArgs = new ArrayList<>();
         for (File file : classpath) {
             if (!file.exists()) {
@@ -423,7 +294,7 @@ public class DevMode {
 
             // hash the file, see if we already have one
             String hash = hash(file);
-            String jszipOut = options.jsZipCacheDir + "/" + hash + "-" + file.getName() + ".js.zip";
+            String jszipOut = options.getJsZipCacheDir() + "/" + hash + "-" + file.getName() + ".js.zip";
             File jszipOutFile = new File(jszipOut);
             if (jszipOutFile.exists()) {
                 additionalClosureArgs.add("--jszip");
@@ -447,7 +318,8 @@ public class DevMode {
             //TODO javac these first, so we have consistent bytecode, and use that to rebuild the classpath
 
             List<String> pretranspile = new ArrayList<>(baseJ2clArgs);
-            pretranspile.addAll(Arrays.asList("-cp", options.bytecodeClasspath, "-d", jszipOut, "-nativesourcepath", file.getAbsolutePath(), processed.getAbsolutePath()));
+            // in theory, we only compile with the dependencies for this particular dep
+            pretranspile.addAll(Arrays.asList("-cp", options.getBytecodeClasspath(), "-d", jszipOut, "-nativesourcepath", file.getAbsolutePath(), processed.getAbsolutePath()));
             Problems result = transpile(pretranspile);
 
             // blindly copy any JS in sources that aren't a native.js
