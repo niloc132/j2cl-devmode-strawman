@@ -2,6 +2,8 @@ package com.vertispan.j2cl;
 
 import com.google.common.base.Preconditions;
 import com.google.javascript.jscomp.CompilerOptions;
+import org.kohsuke.args4j.CmdLineException;
+import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.Option;
 
 import java.io.File;

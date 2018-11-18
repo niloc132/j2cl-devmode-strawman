@@ -8,8 +8,10 @@ import com.google.j2cl.frontend.FrontendUtils.FileInfo;
 import com.google.j2cl.generator.NativeJavaScriptFile;
 import com.google.j2cl.tools.gwtincompatible.JavaPreprocessor;
 import com.google.j2cl.transpiler.J2clTranspiler;
+import com.google.j2cl.transpiler.J2clTranspilerOptions;
 import com.google.javascript.jscomp.*;
 import com.google.javascript.jscomp.Compiler;
+import com.vertispan.j2cl.tools.Javac;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
@@ -76,7 +78,6 @@ public class DevMode {
         System.out.println("intermediate js from j2cl path " + intermediateJsPath);
         File generatedClassesPath = createTempDir();//TODO allow this to be configurable
         System.out.println("generated source path " + generatedClassesPath);
-        String sourcesNativeZipPath = File.createTempFile("proj-native", ".zip").getAbsolutePath();
 
         File classesDirFile = options.getClassesDir();
         System.out.println("output class directory " + classesDirFile);
@@ -86,19 +87,17 @@ public class DevMode {
             classpath.add(new File(path));
         }
 
-        List<String> javacOptions = Arrays.asList("-implicit:none");
-        JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
-        StandardJavaFileManager fileManager = compiler.getStandardFileManager(null, null, null);
-        fileManager.setLocation(StandardLocation.SOURCE_PATH, Collections.emptyList());
-        fileManager.setLocation(StandardLocation.SOURCE_OUTPUT, Collections.singleton(generatedClassesPath));
-        fileManager.setLocation(StandardLocation.CLASS_PATH, classpath);
-        fileManager.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singleton(classesDirFile));
+        Javac javac = new Javac(generatedClassesPath, classpath, classesDirFile);
 
         // put all j2clClasspath items into a list, we'll copy each time and add generated js
-        List<String> baseJ2clArgs = new ArrayList<>(Arrays.asList("-cp", bytecodeClasspath, "-d", intermediateJsPath));
-        if (options.isDeclareLegacyNamespaces()) {
-            baseJ2clArgs.add("-declarelegacynamespaces");
-        }
+        J2clTranspilerOptions.Builder baseJ2clArgs = J2clTranspilerOptions.newBuilder()
+                .setClasspaths(Arrays.asList(bytecodeClasspath.split(":")))
+                .setOutput(Paths.get(intermediateJsPath))
+                .setDeclareLegacyNamespace(options.isDeclareLegacyNamespaces())
+                .setSources(Collections.emptyList())
+                .setNativeSources(Collections.emptyList())
+                .setEmitReadableSourceMap(false)
+                .setGenerateKytheIndexingMetadata(false);
 
         String intermediateJsOutput = options.getJsOutputFile();
         CompilationLevel compilationLevel = CompilationLevel.fromString(options.getCompilationLevel());
@@ -181,21 +180,12 @@ public class DevMode {
                 continue;
             }
 
-            //collect native files in zip, but only if that file is also present in the changed .java sources
-            boolean anyNativeJs = false;
-            try (ZipOutputStream zipOutputStream = new ZipOutputStream(new FileOutputStream(sourcesNativeZipPath))) {
-                for (String dir : options.getSourceDir()) {
-                    anyNativeJs |= Files.find(Paths.get(dir), Integer.MAX_VALUE, (path, attrs) -> shouldZip(path, modifiedJavaFiles)).reduce(false, (ignore, file) -> {
-                        try {
-                            zipOutputStream.putNextEntry(new ZipEntry(Paths.get(dir).toAbsolutePath().relativize(file.toAbsolutePath()).toString()));
-                            zipOutputStream.write(Files.readAllBytes(file));
-                            zipOutputStream.closeEntry();
-                            return true;
-                        } catch (IOException e) {
-                            throw new UncheckedIOException(e);
-                        }
-                    }, (a, b) -> a || b);
-                }
+            // collect native js files that we'll pass in a list to the transpiler.
+            List<FileInfo> nativeSources = new ArrayList<>();
+            for (String dir : options.getSourceDir()) {
+                Files.find(Paths.get(dir), Integer.MAX_VALUE, (path, attrs) -> shouldZip(path, modifiedJavaFiles)).forEach(file -> {
+                        nativeSources.add(FileInfo.create(file.toString(), Paths.get(dir).toAbsolutePath().relativize(file.toAbsolutePath()).toString()));
+                });
             }
 
             // blindly copy any JS in sources that aren't a native.js
@@ -217,14 +207,10 @@ public class DevMode {
             System.out.println(modifiedJavaFiles.size() + " updated java files");
 //            modifiedJavaFiles.forEach(System.out::println);
 
-            // compile java files with javac into classesDir
-            Iterable<? extends JavaFileObject> modifiedFileObjects = fileManager.getJavaFileObjectsFromStrings(modifiedJavaFiles.stream().map(FileInfo::sourcePath).collect(Collectors.toList()));
-            //TODO pass-non null for "classes" to properly kick apt?
-            //TODO consider a different classpath for this tasks, so as to not interfere with everything else?
-
             long javacStarted = System.currentTimeMillis();
-            CompilationTask task = compiler.getTask(null, fileManager, null, javacOptions, null, modifiedFileObjects);
-            if (!task.call()) {
+
+            javac.compile(modifiedJavaFiles);
+            if (!javac.compile(modifiedJavaFiles)) {
                 //error occurred, should have been logged, skip the rest of this loop
                 continue;
             }
@@ -242,22 +228,24 @@ public class DevMode {
                     ).forEach(file -> modifiedJavaFiles.add(FileInfo.create(file.toString(), file.toString())));
 
             // run preprocessor on changed files
-            File processed = File.createTempFile("preprocessed", ".srcjar");
-            try (FileSystem out = FrontendUtils.initZipOutput(processed.getAbsolutePath(), new Problems())) {
-                JavaPreprocessor.preprocessFiles(modifiedJavaFiles, out, new Problems());
+            File processedZip = File.createTempFile("preprocessed", ".srcjar");
+            try (FileSystem out = FrontendUtils.initZipOutput(processedZip.getAbsolutePath(), new Problems())) {
+                JavaPreprocessor.preprocessFiles(modifiedJavaFiles, out.getPath("/"), new Problems());
             }
 
-            List<String> j2clArgs = new ArrayList<>(baseJ2clArgs);
-            if (anyNativeJs) {
-                j2clArgs.add("-nativesourcepath");
-                j2clArgs.add(sourcesNativeZipPath);
+            J2clTranspilerOptions.Builder j2clArgs = baseJ2clArgs.build().toBuilder();
+            if (!nativeSources.isEmpty()) {
+                j2clArgs.setNativeSources(nativeSources);
             }
-            j2clArgs.add(processed.getAbsolutePath());
+            List<FileInfo> processedJavaFiles = FrontendUtils.getAllSources(Collections.singletonList(processedZip.getAbsolutePath()), new Problems())
+                    .filter(f -> f.sourcePath().endsWith(".java"))
+                    .collect(Collectors.toList());
+            j2clArgs.setSources(processedJavaFiles);
 
             long j2clStarted = System.currentTimeMillis();
-            Problems transpileResult = transpile(j2clArgs);
+            Problems transpileResult = transpile(j2clArgs.build());
 
-            processed.delete();
+            processedZip.delete();
 
             if (transpileResult.reportAndGetExitCode(System.err) != 0) {
                 //print problems
@@ -281,7 +269,7 @@ public class DevMode {
         }
     }
 
-    private static List<String> handleDependencies(Gwt3Options options, List<File> classpath, List<String> baseJ2clArgs, PersistentInputStore persistentInputStore) throws IOException, InterruptedException, ExecutionException {
+    private static List<String> handleDependencies(Gwt3Options options, List<File> classpath, J2clTranspilerOptions.Builder baseJ2clArgs, PersistentInputStore persistentInputStore) throws IOException, InterruptedException, ExecutionException {
         List<String> additionalClosureArgs = new ArrayList<>();
         for (File file : classpath) {
             if (!file.exists()) {
@@ -295,6 +283,7 @@ public class DevMode {
             // hash the file, see if we already have one
             String hash = hash(file);
             String jszipOut = options.getJsZipCacheDir() + "/" + hash + "-" + file.getName() + ".js.zip";
+            System.out.println(file + " will be built to " + jszipOut);
             File jszipOutFile = new File(jszipOut);
             if (jszipOutFile.exists()) {
                 additionalClosureArgs.add("--jszip");
@@ -307,20 +296,36 @@ public class DevMode {
             // run preprocessor
             File processed = File.createTempFile("preprocessed", ".srcjar");
             try (FileSystem out = FrontendUtils.initZipOutput(processed.getAbsolutePath(), new Problems())) {
-                ImmutableList<FileInfo> allSources = FrontendUtils.getAllSources(Collections.singletonList(file.getAbsolutePath()), new Problems()).collect(ImmutableList.toImmutableList());
+                ImmutableList<FileInfo> allSources = FrontendUtils.getAllSources(Collections.singletonList(file.getAbsolutePath()), new Problems())
+                        .filter(f -> f.sourcePath().endsWith(".java"))
+                        .collect(ImmutableList.toImmutableList());
                 if (allSources.isEmpty()) {
                     System.out.println("no sources in file " + file);
                     continue;
                 }
-                JavaPreprocessor.preprocessFiles(allSources, out, new Problems());
+                JavaPreprocessor.preprocessFiles(allSources, out.getPath("/"), new Problems());
             }
 
             //TODO javac these first, so we have consistent bytecode, and use that to rebuild the classpath
 
-            List<String> pretranspile = new ArrayList<>(baseJ2clArgs);
+            J2clTranspilerOptions.Builder pretranspile = baseJ2clArgs.build().toBuilder();
             // in theory, we only compile with the dependencies for this particular dep
-            pretranspile.addAll(Arrays.asList("-cp", options.getBytecodeClasspath(), "-d", jszipOut, "-nativesourcepath", file.getAbsolutePath(), processed.getAbsolutePath()));
-            Problems result = transpile(pretranspile);
+//            pretranspile.setClasspaths(Arrays.asList(options.getBytecodeClasspath().split(":")));
+            pretranspile.setOutput(FrontendUtils.initZipOutput(jszipOut, new Problems()).getPath("/"));
+            pretranspile.setNativeSources(FrontendUtils.getAllSources(Collections.singletonList(file.getAbsolutePath()), new Problems())
+                    .filter(p -> p.sourcePath().endsWith(".native.js"))
+                    .collect(ImmutableList.toImmutableList()));
+            List<FileInfo> processedJavaFiles = FrontendUtils.getAllSources(Collections.singletonList(processed.getAbsolutePath()), new Problems())
+                    .filter(f -> f.sourcePath().endsWith(".java"))
+                    .collect(Collectors.toList());
+            if (processedJavaFiles.isEmpty()) {
+                System.out.println("no sources left in " + file + " after preprocessing");
+                continue;
+//            } else {
+//                processedJavaFiles.forEach(f -> System.out.println("\t" + f.sourcePath()));
+            }
+            pretranspile.setSources(processedJavaFiles);
+            Problems result = transpile(pretranspile.build());
 
             // blindly copy any JS in sources that aren't a native.js
             ZipFile zipInputFile = new ZipFile(file);
@@ -369,8 +374,8 @@ public class DevMode {
      * Transpiles Java to Js. Should have the same effect as running the main directly, except by running
      * it here we don't System.exit at the end, so the JVM can stay hot.
      */
-    private static Problems transpile(List<String> j2clArgs) {
-        return J2clTranspiler.transpile(j2clArgs.toArray(new String[0]));
+    private static Problems transpile(J2clTranspilerOptions j2clArgs) {
+        return J2clTranspiler.transpile(j2clArgs);
     }
 
     private static boolean shouldZip(Path path, List<FileInfo> modifiedJavaFiles) {
