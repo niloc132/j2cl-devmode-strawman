@@ -1,18 +1,12 @@
-Do not use this to build/deploy j2cl any more - instead, in my fork's `master` branch, first cd into `maven/`, then
-run `build.sh`, then `mvn install`. That will stick the jre, bootstrap, and all the dependencies needed for the
-preprocessor and transpiler.
-
 Rough attempt at some build tools:
 
- * build.sh - production compile strawman, showing a process that could be used on each dependency to prepare its transpiled
-JS, and collect them all and build into a final optimized result. Currently only needed to build jsinterop-base's jzip.
  * DevMode.main() - Java strawman for dev mode. Keeps the JVM hot between builds, dramatically improving the performance
  of J2CL versus running it from the command line, and leverages a PersistentInputStore for jscomp to avoid re-reading
  all JS from disk each time. It supports a jszip cache directory to precompile source jars to JS, and will soon have a
  matching bytecode cache as well.
 
 The first two scripts assume that everyone loves maven, and that you plan to build the
-https://github.com/vertispan/connected/tree/no-gwt-user project, with just part of elemental2, and no other dependencies
+https://github.com/vertispan/connected/tree/j2cl project, with just part of elemental2, and no other dependencies
 
 Prerequisites:
  * Project that can be compiled in J2CL
@@ -30,7 +24,7 @@ Build process, and assumptions:
 Assuming:
  * No globally consistent version of j2cl (requires local cache clearing as needed)
    * No or partially distributed `.j2.zip`s (would require versioning by j2cl, re-releasing by entire ecosystem for any incremental release)
- * In constrast, preprocessor is _not_ expected to change (though the steps below don't currently leverage this)
+ * In contrast, preprocessor is _not_ expected to change (though the steps below don't currently leverage this)
  * Closure will continue to error on duplicate declared modules
  * External (not in jre.jar) "supersource" still matters (i.e. gwt will not accept any arbitrary emulation)
  * Dependencies which supersource themselves still are permitted to be used
@@ -40,14 +34,17 @@ Steps:
  * unpack all .js.zip that are provided (may be as little as jre.js.zip and bootstrap.js.zip)
  * precompile all source jar dependencies (possibly checking a cache and skipping some if up to date)
    * this includes preprocessing, since the preprocessor is tied to the compiler and may change
-   * javac those sources, so we have bytecode to speed up later j2cl calls
-   * this also required de-duping "self-supersourced" js classes, as j2cl doesn't allow dups
- * unpack all upstream .js.zips to a single dir in order of java classpath (in order to allow "classpath hiding")
- * discover, skip any types which are "self-supersourced" within the project
- * preprocess current sources
+   * (not done today) javac those sources, so we have bytecode to speed up later j2cl calls which actually matches the js
+     * note that annotation processors shouldn't be re-run, so we're processing those generated sources too
+   * (FUTURE?) this also requires de-duping "self-supersourced" js classes, as j2cl doesn't allow dups
+ * (not done today) unpack all upstream .js.zips to a single dir in order of java classpath (in order to allow
+ "classpath hiding")
+ * (not done today) discover, skip any types which are "self-supersourced" within the project
+ * preprocess current sources - note that this happens _before_ running processor, as opposed to how it happens to dependencies
  * (if incremental, or if we don't assume already javac'd for apt) javac current sources
- * preprocess any generated sources
+ * preprocess any generated sources? this isn't done yet, but would need to be in order to be more consistent with how
+ we handle dependencies
  * transpile current sources and current generated sources to the same dir as dependency output
  * (missing) resolve properties, permutations
- * Run closure on all generated js, including entrypoint and defines
+ * Run closure on all generated js, with entrypoint and `--define` statements
  * (missing) link permutations

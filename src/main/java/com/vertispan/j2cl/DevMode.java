@@ -51,7 +51,6 @@ import static com.google.common.io.Files.createTempDir;
  *     think I got it right to pick up generated classes changes too...
  *
  * Not so good:
- *   o J2CL seems difficult to integrate (no public, uses threadlocals)
  *   o Not correctly recompiling classes that require it based on dependencies
  *   o Not at all convinced my javac wiring is correct
  *   o Polling for changes
@@ -317,7 +316,7 @@ public class DevMode {
                     .collect(ImmutableList.toImmutableList()));
             List<FileInfo> processedJavaFiles = FrontendUtils.getAllSources(Collections.singletonList(processed.getAbsolutePath()), new Problems())
                     .filter(f -> f.sourcePath().endsWith(".java"))
-                    .collect(Collectors.toList());
+                    .collect(ImmutableList.toImmutableList());
             if (processedJavaFiles.isEmpty()) {
                 System.out.println("no sources left in " + file + " after preprocessing");
                 continue;
