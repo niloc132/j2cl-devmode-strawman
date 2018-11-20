@@ -5,7 +5,7 @@ import java.util.List;
 
 import com.google.javascript.jscomp.CompilerOptions;
 
- interface Gwt3Options {
+public interface Gwt3Options {
 
     /**
      * Returns a path to where raw sources and sourcemaps will be in the generated JS output directory
