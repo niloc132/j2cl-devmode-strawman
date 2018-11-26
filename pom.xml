@@ -121,7 +121,6 @@
       <url>https://repo.vertispan.com/j2cl</url>
     </snapshotRepository>
   </distributionManagement>
-
   <repositories>
     <repository>
       <id>vertispan-releases</id>
