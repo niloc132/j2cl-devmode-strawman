@@ -10,36 +10,36 @@ public interface Gwt3Options {
     /**
      * Returns a path to where raw sources and sourcemaps will be in the generated JS output directory
      */
-     String getIntermediateJsPath();
+    String getIntermediateJsPath();
 
     /**
      * Returns a directory where class files will be compiled to
      */
-     File getClassesDir();
+    File getClassesDir();
 
-     boolean isDeclareLegacyNamespaces();
+    boolean isDeclareLegacyNamespaces();
 
-     String getBytecodeClasspath();
+    List<String> getBytecodeClasspath();
 
-     String getJsOutputFile();
+    String getJsOutputFile();
 
-     List<String> getEntrypoint();
+    List<String> getEntrypoint();
 
-     List<String> getDefine();
+    List<String> getDefine();
 
-     List<String> getExterns();
+    List<String> getExterns();
 
-     String getLanguageOut();
+    String getLanguageOut();
 
-     String getCompilationLevel();
+    String getCompilationLevel();
 
-     CompilerOptions.DependencyMode getDependencyMode();
+    CompilerOptions.DependencyMode getDependencyMode();
 
-     String getJ2clClasspath();
+    List<String> getJ2clClasspath();
 
-     List<String> getSourceDir();
+    List<String> getSourceDir();
 
-     String getJsZipCacheDir();
+    String getJsZipCacheDir();
 
-     String getOutputJsPathDir();
- }
+    String getOutputJsPathDir();
+}

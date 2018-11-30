@@ -78,9 +78,9 @@ public class ListeningCompiler {
 
         File classesDirFile = options.getClassesDir();
         System.out.println("output class directory " + classesDirFile);
-        String bytecodeClasspath = options.getBytecodeClasspath() + ":" + classesDirFile.getAbsolutePath();
+        options.getBytecodeClasspath().add(classesDirFile.getAbsolutePath());
         List<File> classpath = new ArrayList<>();
-        for (String path : bytecodeClasspath.split(File.pathSeparator)) {
+        for (String path : options.getBytecodeClasspath()) {
             classpath.add(new File(path));
         }
 
@@ -88,7 +88,7 @@ public class ListeningCompiler {
 
         // put all j2clClasspath items into a list, we'll copy each time and add generated js
         J2clTranspilerOptions.Builder baseJ2clArgs = J2clTranspilerOptions.newBuilder()
-                .setClasspaths(Arrays.asList(bytecodeClasspath.split(":")))
+                .setClasspaths(options.getBytecodeClasspath())
                 .setOutput(Paths.get(intermediateJsPath))
                 .setDeclareLegacyNamespace(options.isDeclareLegacyNamespaces())
                 .setSources(Collections.emptyList())
@@ -127,7 +127,7 @@ public class ListeningCompiler {
         // and still allow jscomp to be in modes other than BUNDLE
         PersistentInputStore persistentInputStore = new PersistentInputStore();
 
-        for (String zipPath : options.getJ2clClasspath().split(File.pathSeparator)) {
+        for (String zipPath : options.getJ2clClasspath()) {
             Preconditions.checkArgument(new File(zipPath).exists() && new File(zipPath).isFile(), "jszip doesn't exist! %s", zipPath);
 
             baseClosureArgs.add("--jszip");

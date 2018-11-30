@@ -18,12 +18,12 @@ public class Gwt3OptionsImpl implements Gwt3Options {
             "processed, source jars will be preprocessed, transpiled, and cached. This is only " +
             "done on startup, sources that should be monitored for changes should be passed in " +
             "via -src", required = true)
-    String bytecodeClasspath;
+    List<String> bytecodeClasspath;
 
     @Option(name = "-jsClasspath", usage = "specify js archive classpath that won't be " +
             "transpiled from sources or classpath. If nothing else, should include " +
             "bootstrap.js.zip and jre.js.zip", required = true)
-    String j2clClasspath;
+    List<String> j2clClasspath;
 
     @Option(name = "-out", usage = "indicates where to write generated JS sources, sourcemaps, " +
             "etc. Should be a directory specific to gwt, anything may be overwritten there, " +
@@ -152,7 +152,7 @@ public class Gwt3OptionsImpl implements Gwt3Options {
     }
 
     @Override
-    public String getBytecodeClasspath() {
+    public List<String> getBytecodeClasspath() {
         return bytecodeClasspath;
     }
 
@@ -192,7 +192,7 @@ public class Gwt3OptionsImpl implements Gwt3Options {
     }
 
     @Override
-    public String getJ2clClasspath() {
+    public List<String> getJ2clClasspath() {
         return j2clClasspath;
     }
 

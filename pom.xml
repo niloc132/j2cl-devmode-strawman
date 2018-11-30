@@ -4,7 +4,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <groupId>com.vertispan.j2cl</groupId>
   <artifactId>build-tools</artifactId>
-  <version>0.2-SNAPSHOT</version>
+  <version>0.2a-SNAPSHOT</version>
 
   <modelVersion>4.0.0</modelVersion>
 
