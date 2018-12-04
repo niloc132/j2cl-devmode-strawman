@@ -1,3 +1,11 @@
+Last modifications (ver. 0.3):
+Class/methods have been split.
+The **SingleCompiler** now actually executes a single compilation. It also contains the code required for that wrapped in different methods; a specific method
+has been implemented to retrieve the list of files changed from a given time.
+**ListeningCompiler** just starts a continuos loop to invoke a single compilation from **SingleCompiler** if some file has been changed.
+
+
+
 Rough attempt at some build tools:
 
  * DevMode.main() - Java strawman for dev mode. Keeps the JVM hot between builds, dramatically improving the performance
