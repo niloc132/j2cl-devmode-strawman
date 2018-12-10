@@ -37,6 +37,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -178,22 +179,6 @@ public class SingleCompiler {
             });
         }
 
-        // blindly copy any JS in sources that aren't a native.js
-        // TODO be less "blind" about this, only copy changed files?
-        for (String dir : options.getSourceDir()) {
-            Files.find(Paths.get(dir), Integer.MAX_VALUE, (path, attrs) -> jsMatcher.matches(path) && !nativeJsMatcher.matches(path))
-                    .forEach(path -> {
-                        try {
-                            final Path target = Paths.get(options.getOutputJsPathDir(), Paths.get(dir).toAbsolutePath().relativize(path.toAbsolutePath()).toString());
-                            Files.createDirectories(target.getParent());
-                            // using StandardCopyOption.REPLACE_EXISTING seems overly pessimistic, but i can't get it to work without it
-                            Files.copy(path, target, StandardCopyOption.REPLACE_EXISTING);
-                        } catch (IOException e) {
-                            throw new RuntimeException("failed to copy plain js", e);
-                        }
-                    });
-        }
-
         LOGGER.info(modifiedJavaFiles.size() + " updated java files");
 //            modifiedJavaFiles.forEach(System.out::println);
 
@@ -205,6 +190,23 @@ public class SingleCompiler {
             return;
         }
         long javacTime = System.currentTimeMillis() - javacStarted;
+
+        // blindly copy any JS in sources that aren't a native.js
+        // TODO be less "blind" about this, only copy changed files?
+        Iterable<String> dirs = () -> Stream.concat(Stream.of(generatedClassesPath.getAbsolutePath()), options.getSourceDir().stream()).iterator();
+        for (String dir : dirs) {
+            Files.find(Paths.get(dir), Integer.MAX_VALUE, (path, attrs) -> jsMatcher.matches(path) && !nativeJsMatcher.matches(path))
+                    .forEach(path -> {
+                        try {
+                            final Path target = Paths.get(options.getIntermediateJsPath(), Paths.get(dir).toAbsolutePath().relativize(path.toAbsolutePath()).toString());
+                            Files.createDirectories(target.getParent());
+                            // using StandardCopyOption.REPLACE_EXISTING seems overly pessimistic, but i can't get it to work without it
+                            Files.copy(path, target, StandardCopyOption.REPLACE_EXISTING);
+                        } catch (IOException e) {
+                            throw new RuntimeException("failed to copy plain js", e);
+                        }
+                    });
+        }
 
         // add all modified Java files
         //TODO don't just use all generated classes, but look for changes maybe?
@@ -263,7 +265,7 @@ public class SingleCompiler {
      */
     protected static List<FrontendUtils.FileInfo> getModifiedJavaFiles(FileTime newerThan) throws IOException {
         List<FrontendUtils.FileInfo> toReturn = new ArrayList<>();
-    //this isn't quite right - should check for _at least one_ newer than lastModified, and if so, recompile all
+        //this isn't quite right - should check for _at least one_ newer than lastModified, and if so, recompile all
         //newer than lastSuccess
         //also, should look for .native.js too, but not collect them
         for (String dir : options.getSourceDir()) {
