@@ -17,12 +17,12 @@ public class Gwt3OptionsImpl implements Gwt3Options {
     @Option(name = "-classpath", usage = "java classpath. bytecode jars are assumed to be pre-" +
             "processed, source jars will be preprocessed, transpiled, and cached. This is only " +
             "done on startup, sources that should be monitored for changes should be passed in " +
-            "via -src", required = true)
+            "via -src", required = true, handler = FileSeparatorHandler.class)
     List<String> bytecodeClasspath;
 
     @Option(name = "-jsClasspath", usage = "specify js archive classpath that won't be " +
             "transpiled from sources or classpath. If nothing else, should include " +
-            "bootstrap.js.zip and jre.js.zip", required = true)
+            "bootstrap.js.zip and jre.js.zip", required = true, handler = FileSeparatorHandler.class)
     List<String> j2clClasspath;
 
     @Option(name = "-out", usage = "indicates where to write generated JS sources, sourcemaps, " +
