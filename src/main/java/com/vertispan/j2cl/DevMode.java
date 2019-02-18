@@ -12,7 +12,7 @@ import org.kohsuke.args4j.CmdLineParser;
 public class DevMode {
 
     public static void main(String[] args) throws IOException, InterruptedException, ExecutionException {
-        Gwt3Options options = new Gwt3OptionsImpl();
+        Gwt3Options options = new Gwt3OptionsImplBuilder().createGwt3OptionsImpl();
         CmdLineParser parser = new CmdLineParser(options);
         try {
             parser.parseArgument(args);

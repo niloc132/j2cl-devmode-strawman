@@ -13,7 +13,7 @@ import static com.google.common.io.Files.createTempDir;
 public class Gwt3OptionsImpl implements Gwt3Options {
     @Option(name = "-src", usage = "specify one or more java source directories", required = true)
     private
-    List<String> sourceDir = new ArrayList<>();
+    List<String> sourceDir;
     @Option(name = "-classpath", usage = "java classpath. bytecode jars are assumed to be pre-" +
             "processed, source jars will be preprocessed, transpiled, and cached. This is only " +
             "done on startup, sources that should be monitored for changes should be passed in " +
@@ -37,7 +37,7 @@ public class Gwt3OptionsImpl implements Gwt3Options {
 
     @Option(name = "-entrypoint", aliases = "--entry_point",
             usage = "one or more entrypoints to start the app with, from either java or js")
-    List<String> entrypoint = new ArrayList<>();
+    List<String> entrypoint;
 
     @Option(name = "-jsZipCache", usage = "directory to cache generated jszips in. Should be " +
             "cleared when j2cl version changes", required = true)
@@ -51,13 +51,13 @@ public class Gwt3OptionsImpl implements Gwt3Options {
                     + "variable and <val> is a boolean, number, or a single-quoted string "
                     + "that contains no single quotes. If [=<val>] is omitted, "
                     + "the variable is marked true")
-    List<String> define = new ArrayList<>();
+    List<String> define;
 
     //lifted straight from closure for consistency
     @Option(name = "--externs",
             usage = "The file containing JavaScript externs. You may specify"
                     + " multiple")
-    List<String> externs = new ArrayList<>();
+    List<String> externs;
 
     //lifted straight from closure for consistency
     @Option(
@@ -70,7 +70,7 @@ public class Gwt3OptionsImpl implements Gwt3Options {
                             + "SIMPLE (default), "
                             + "ADVANCED"
     )
-    String compilationLevel = "BUNDLE";
+    String compilationLevel;
 
     //lifted straight from closure for consistency
     @Option(
@@ -81,7 +81,7 @@ public class Gwt3OptionsImpl implements Gwt3Options {
                             + "ECMASCRIPT6_TYPED (experimental), ECMASCRIPT_2015, ECMASCRIPT_2016, "
                             + "ECMASCRIPT_2017, ECMASCRIPT_NEXT, NO_TRANSPILE"
     )
-    String languageOut = "ECMASCRIPT5";
+    String languageOut;
 
     //lifted straight from closure for consistency (this should get a rewrite to clarify that for gwt-like
     // behavior, NONE should be avoided. Default changed to strict.
@@ -97,9 +97,7 @@ public class Gwt3OptionsImpl implements Gwt3Options {
                     + "and are not modules will be automatically added as "
                     + "--entry_point entries. "//Defaults to NONE."
     )
-    CompilerOptions.DependencyMode dependencyMode = CompilerOptions.DependencyMode.STRICT;
-
-
+    CompilerOptions.DependencyMode dependencyMode;
 
     // j2cl-specific flag
     @Option(name = "-declarelegacynamespaces",
@@ -108,6 +106,24 @@ public class Gwt3OptionsImpl implements Gwt3Options {
             hidden = true
     )
     boolean declareLegacyNamespaces = false;
+
+
+    //works with builder so test can create instances, copying properties as needed
+    Gwt3OptionsImpl(List<String> sourceDir, List<String> bytecodeClasspath, List<String> j2clClasspath, String outputJsPathDir, String classesDir, List<String> entrypoint, String jsZipCacheDir, List<String> define, List<String> externs, String compilationLevel, String languageOut, CompilerOptions.DependencyMode dependencyMode, boolean declareLegacyNamespaces) {
+        this.sourceDir = sourceDir;
+        this.bytecodeClasspath = bytecodeClasspath;
+        this.j2clClasspath = j2clClasspath;
+        this.outputJsPathDir = outputJsPathDir;
+        this.classesDir = classesDir;
+        this.entrypoint = entrypoint;
+        this.jsZipCacheDir = jsZipCacheDir;
+        this.define = define;
+        this.externs = externs;
+        this.compilationLevel = compilationLevel;
+        this.languageOut = languageOut;
+        this.dependencyMode = dependencyMode;
+        this.declareLegacyNamespaces = declareLegacyNamespaces;
+    }
 
 
     /**
