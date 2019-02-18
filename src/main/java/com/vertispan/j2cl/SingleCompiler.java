@@ -118,6 +118,7 @@ public class SingleCompiler {
                 .setDeclareLegacyNamespace(options.isDeclareLegacyNamespaces())
                 .setSources(Collections.emptyList())
                 .setNativeSources(Collections.emptyList())
+                .setEmitReadableLibraryInfo(false)
                 .setEmitReadableSourceMap(false)
                 .setGenerateKytheIndexingMetadata(false);
 
