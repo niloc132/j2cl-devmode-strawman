@@ -109,7 +109,7 @@ public class SingleCompiler {
             classpath.add(new File(path));
         }
 
-        javac = new Javac(generatedClassesPath, classpath, classesDirFile);
+        javac = new Javac(generatedClassesPath, classpath, classesDirFile, options.getBootstrapClasspath());
 
         // put all j2clClasspath items into a list, we'll copy each time and add generated js
         baseJ2clArgs = J2clTranspilerOptions.newBuilder()

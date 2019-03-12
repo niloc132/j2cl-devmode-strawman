@@ -25,6 +25,10 @@ public class Gwt3OptionsImpl implements Gwt3Options {
             "bootstrap.js.zip and jre.js.zip", required = true, handler = FileSeparatorHandler.class)
     List<String> j2clClasspath;
 
+    @Option(name = "-javacBootClasspath", usage = "Path to the javac-bootstrap-classpath jar, " +
+            "so javac can correctly compile java sources", required = true)
+    String javacBootClasspath;
+
     @Option(name = "-out", usage = "indicates where to write generated JS sources, sourcemaps, " +
             "etc. Should be a directory specific to gwt, anything may be overwritten there, " +
             "but probably should be somewhere your server will pass to the browser", required = true)
@@ -109,10 +113,11 @@ public class Gwt3OptionsImpl implements Gwt3Options {
 
 
     //works with builder so test can create instances, copying properties as needed
-    Gwt3OptionsImpl(List<String> sourceDir, List<String> bytecodeClasspath, List<String> j2clClasspath, String outputJsPathDir, String classesDir, List<String> entrypoint, String jsZipCacheDir, List<String> define, List<String> externs, String compilationLevel, String languageOut, CompilerOptions.DependencyMode dependencyMode, boolean declareLegacyNamespaces) {
+    Gwt3OptionsImpl(List<String> sourceDir, List<String> bytecodeClasspath, List<String> j2clClasspath, String javacBootClasspath, String outputJsPathDir, String classesDir, List<String> entrypoint, String jsZipCacheDir, List<String> define, List<String> externs, String compilationLevel, String languageOut, CompilerOptions.DependencyMode dependencyMode, boolean declareLegacyNamespaces) {
         this.sourceDir = sourceDir;
         this.bytecodeClasspath = bytecodeClasspath;
         this.j2clClasspath = j2clClasspath;
+        this.javacBootClasspath = javacBootClasspath;
         this.outputJsPathDir = outputJsPathDir;
         this.classesDir = classesDir;
         this.entrypoint = entrypoint;
@@ -225,5 +230,10 @@ public class Gwt3OptionsImpl implements Gwt3Options {
 
     public String getOutputJsPathDir() {
         return outputJsPathDir;
+    }
+
+    @Override
+    public File getBootstrapClasspath() {
+        return new File(javacBootClasspath);
     }
 }

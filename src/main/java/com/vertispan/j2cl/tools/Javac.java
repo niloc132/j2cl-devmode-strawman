@@ -6,6 +6,7 @@ import javax.tools.*;
 import javax.tools.JavaCompiler.CompilationTask;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -26,12 +27,14 @@ public class Javac {
     List<String> javacOptions;
     JavaCompiler compiler;
     StandardJavaFileManager fileManager;
-    public Javac(File generatedClassesPath, List<File> classpath, File classesDirFile) throws IOException {
-        javacOptions = Arrays.asList("-implicit:none");
+    public Javac(File generatedClassesPath, List<File> classpath, File classesDirFile, File bootstrap) throws IOException {
+        javacOptions = Arrays.asList("-implicit:none", "-bootclasspath", bootstrap.toString());
         compiler = ToolProvider.getSystemJavaCompiler();
         fileManager = compiler.getStandardFileManager(null, null, null);
         fileManager.setLocation(StandardLocation.SOURCE_PATH, Collections.emptyList());
         fileManager.setLocation(StandardLocation.SOURCE_OUTPUT, Collections.singleton(generatedClassesPath));
+        classpath = new ArrayList<>(classpath);
+        classpath.add(bootstrap);
         fileManager.setLocation(StandardLocation.CLASS_PATH, classpath);
         fileManager.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singleton(classesDirFile));
     }

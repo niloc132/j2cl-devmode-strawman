@@ -9,6 +9,7 @@ public class Gwt3OptionsImplBuilder {
     private List<String> sourceDir = new ArrayList<>();
     private List<String> bytecodeClasspath;
     private List<String> j2clClasspath = new ArrayList<>();
+    private String javacBootClasspath;
     private String outputJsPathDir;
     private String classesDir;
     private List<String> entrypoint = new ArrayList<>();
@@ -32,6 +33,11 @@ public class Gwt3OptionsImplBuilder {
 
     public Gwt3OptionsImplBuilder setJ2clClasspath(List<String> j2clClasspath) {
         this.j2clClasspath = j2clClasspath;
+        return this;
+    }
+
+    public Gwt3OptionsImplBuilder setJavacBootClasspath(String javacBootClasspath) {
+        this.javacBootClasspath = javacBootClasspath;
         return this;
     }
 
@@ -86,6 +92,6 @@ public class Gwt3OptionsImplBuilder {
     }
 
     public Gwt3OptionsImpl createGwt3OptionsImpl() {
-        return new Gwt3OptionsImpl(sourceDir, bytecodeClasspath, j2clClasspath, outputJsPathDir, classesDir, entrypoint, jsZipCacheDir, define, externs, compilationLevel, languageOut, dependencyMode, declareLegacyNamespaces);
+        return new Gwt3OptionsImpl(sourceDir, bytecodeClasspath, j2clClasspath, javacBootClasspath, outputJsPathDir, classesDir, entrypoint, jsZipCacheDir, define, externs, compilationLevel, languageOut, dependencyMode, declareLegacyNamespaces);
     }
 }

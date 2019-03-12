@@ -24,6 +24,10 @@ public class Gwt3TestOptions {
             "bootstrap.js.zip and jre.js.zip", required = true, handler = FileSeparatorHandler.class)
     List<String> j2clClasspath;
 
+    @Option(name = "-javacBootClasspath", usage = "Path to the javac-bootstrap-classpath jar, " +
+            "so javac can correctly compile java sources", required = true)
+    String javacBootClasspath;
+
     @Option(name = "-out", usage = "indicates where to write generated JS sources, sourcemaps, " +
             "etc. Should be a directory specific to gwt, anything may be overwritten there, " +
             "but probably should be somewhere your server will pass to the browser", required = true)
@@ -69,6 +73,7 @@ public class Gwt3TestOptions {
                 .setSourceDir(sourceDir)
                 .setBytecodeClasspath(bytecodeClasspath)
                 .setJ2clClasspath(j2clClasspath)
+                .setJavacBootClasspath(javacBootClasspath)
                 .setOutputJsPathDir(outputJsPathDir)
                 .setClassesDir(classesDir)
                 .setClassesDir(classesDir)
